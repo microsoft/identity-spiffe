@@ -1,0 +1,63 @@
+# Identity Research for Agent Management Using SPIFFE Triggered Workflow — DeveloperAgent governed round-trip demo
+# This workflow is dispatched by DeveloperAgent via budget-backend /github/trigger.
+# On completion, it calls back to Identity Research for Agent Management Using SPIFFE via identity-spiffe-auth for the governed round-trip.
+#
+# IMPORTANT: This file must exist on the default branch (main) for
+# workflow_dispatch to work via API. See hard-won-learnings.md.
+name: Identity Research for Agent Management Using SPIFFE Triggered Workflow
+on:
+  workflow_dispatch:
+    inputs:
+      correlation_id:
+        description: 'Identity Research for Agent Management Using SPIFFE correlation ID for governed round-trip'
+        required: true
+      triggered_by:
+        description: 'Identity Research for Agent Management Using SPIFFE identity string that triggered this run'
+        required: true
+      agent_oid:
+        description: 'Entra Agent Identity OID'
+        required: false
+      spiffe_id:
+        description: 'SPIFFE ID of the caller'
+        required: false
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  execute:
+    runs-on: [self-hosted, identity-spiffe-runner]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Execute task
+        id: task
+        run: |
+          echo "Executing task triggered by ${{ inputs.triggered_by }}"
+          echo "Correlation ID: ${{ inputs.correlation_id }}"
+          # Demo: run tests or other checks
+          echo "result=success" >> $GITHUB_OUTPUT
+          echo "message=All tests passed" >> $GITHUB_OUTPUT
+
+      - uses: microsoft/identity-spiffe/.github/actions/identity-spiffe-auth@main
+        id: spiffe
+        with:
+          spiffe-endpoint: ${{ vars.SPIFFE_ENDPOINT }}
+
+      - name: Report result back to Identity Research for Agent Management Using SPIFFE
+        run: |
+          # Callback goes through spiffe-proxy on localhost (already running on runner).
+          # spiffe-proxy handles mTLS to budget-backend's sidecar.
+          curl -sf \
+            -H "X-Spiffe-Correlation-ID: ${{ inputs.correlation_id }}" \
+            -H "Authorization: Bearer ${{ steps.spiffe.outputs.spiffe-token }}" \
+            -H "Content-Type: application/json" \
+            -X POST "http://localhost:8080/github/result" \
+            -d '{
+              "correlation_id": "${{ inputs.correlation_id }}",
+              "status": "${{ steps.task.outputs.result }}",
+              "message": "${{ steps.task.outputs.message }}",
+              "workflow": "${{ github.workflow }}",
+              "run_id": "${{ github.run_id }}",
+              "repo": "${{ github.repository }}",
+              "sha": "${{ github.sha }}"
+            }'

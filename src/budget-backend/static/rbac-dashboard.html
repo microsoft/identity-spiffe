@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RBAC Live Dashboard</title>
+  <style>
+    :root {
+      --bg: #f2f5f1;
+      --surface: #ffffff;
+      --ink: #16202a;
+      --muted: #5f6f78;
+      --accent: #0c8c73;
+      --warn: #ce4a3d;
+      --line: #d7dfd7;
+      --ok: #0a9f6f;
+      --deny: #cb3e2f;
+      --shadow: 0 10px 25px rgba(20, 40, 28, 0.09);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 500px at 85% -10%, #cae5d9 0%, transparent 70%),
+        radial-gradient(900px 400px at -5% 15%, #e8ecce 0%, transparent 70%),
+        var(--bg);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 20px 36px;
+    }
+
+    h1, h2, h3 { margin: 0; }
+    h1 { font-size: 1.8rem; }
+    h2 { font-size: 1.1rem; margin-bottom: 10px; }
+    small, .muted { color: var(--muted); }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button {
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--ink);
+      color: #fff;
+    }
+
+    button.secondary {
+      background: #fff;
+      color: var(--ink);
+      border-color: var(--line);
+    }
+
+    button:disabled { opacity: 0.6; cursor: progress; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      padding: 14px;
+    }
+
+    .span-4 { grid-column: span 4; }
+    .span-6 { grid-column: span 6; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .kpi {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fbfcfa;
+    }
+
+    .kpi .value {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+
+    .donut-wrap {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 12px;
+    }
+
+    .donut {
+      width: 94px;
+      height: 94px;
+      border-radius: 50%;
+      position: relative;
+      background: conic-gradient(var(--ok) 0deg, var(--ok) 180deg, var(--deny) 180deg 360deg);
+      flex: 0 0 auto;
+    }
+
+    .donut::after {
+      content: "";
+      position: absolute;
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: var(--surface);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .bars { margin-top: 8px; }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 220px 1fr 58px;
+      gap: 10px;
+      align-items: center;
+      margin: 6px 0;
+    }
+
+    .bar-label {
+      font-size: 0.83rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: "Menlo", "Consolas", monospace;
+    }
+
+    .bar-track {
+      height: 10px;
+      border-radius: 999px;
+      background: #ebf0ec;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #18aa80, #0c8c73);
+    }
+
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .allow { background: #daf5eb; color: #006e4f; }
+    .deny { background: #fadfdd; color: #8d1a0f; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      padding: 7px 4px;
+      vertical-align: top;
+    }
+
+    .mono {
+      font-family: "Menlo", "Consolas", monospace;
+      font-size: 0.78rem;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 270px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font-family: "Menlo", "Consolas", monospace;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      resize: vertical;
+    }
+
+    .status {
+      border-left: 3px solid var(--accent);
+      padding: 6px 10px;
+      background: #f4faf8;
+      border-radius: 6px;
+      margin-top: 8px;
+      font-size: 0.88rem;
+    }
+
+    .status.error {
+      border-left-color: var(--warn);
+      background: #fff3f2;
+    }
+
+    @media (max-width: 980px) {
+      .span-4, .span-6, .span-8 { grid-column: span 12; }
+      .bar-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <h1>RBAC Live Dashboard</h1>
+        <small id="last-refresh">Loading...</small>
+      </div>
+      <div class="actions">
+        <button class="secondary" id="refresh-btn">Refresh now</button>
+        <span class="muted">Auto-refresh every 2.5s</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="card span-4">
+        <h2>Health</h2>
+        <div id="health-lines" class="mono muted">Waiting for health data...</div>
+      </section>
+
+      <section class="card span-8">
+        <h2>Request Metrics</h2>
+        <div class="kpis">
+          <div class="kpi"><small>Total Requests</small><div class="value" id="total-requests">0</div></div>
+          <div class="kpi"><small>Allowed</small><div class="value" id="total-allowed">0</div></div>
+          <div class="kpi"><small>Denied</small><div class="value" id="total-denied">0</div></div>
+        </div>
+        <div class="donut-wrap">
+          <div class="donut" id="decision-donut"></div>
+          <div>
+            <div><span class="badge allow">allow</span> <span id="allow-rate">0%</span></div>
+            <div style="margin-top:6px"><span class="badge deny">deny</span> <span id="deny-rate">0%</span></div>
+          </div>
+        </div>
+        <div class="bars" id="caller-bars"></div>
+      </section>
+
+      <section class="card span-12">
+        <h2>Recent Audit Events</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Caller</th>
+              <th>Method</th>
+              <th>Path</th>
+              <th>Decision</th>
+              <th>Reason</th>
+              <th>Latency</th>
+            </tr>
+          </thead>
+          <tbody id="audit-body">
+            <tr><td colspan="7" class="muted">Waiting for audit data...</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card span-12">
+        <h2>Live Policy Editor</h2>
+        <small>Edits are sent to runtime via PUT and apply immediately in memory.</small>
+        <textarea id="policy-editor"></textarea>
+        <div class="actions" style="margin-top: 10px;">
+          <button id="apply-policy-btn">Apply policy</button>
+          <button class="secondary" id="reload-policy-btn">Reload from runtime</button>
+        </div>
+        <div id="policy-status" class="status">Ready.</div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const healthNode = document.getElementById("health-lines");
+    const auditBody = document.getElementById("audit-body");
+    const callerBars = document.getElementById("caller-bars");
+    const donut = document.getElementById("decision-donut");
+    const policyEditor = document.getElementById("policy-editor");
+    const policyStatus = document.getElementById("policy-status");
+    const refreshLabel = document.getElementById("last-refresh");
+    const refreshButton = document.getElementById("refresh-btn");
+    const applyPolicyButton = document.getElementById("apply-policy-btn");
+    const reloadPolicyButton = document.getElementById("reload-policy-btn");
+
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const text = await response.text();
+      let payload = {};
+      try { payload = text ? JSON.parse(text) : {}; }
+      catch { payload = { raw: text }; }
+      if (!response.ok) {
+        const detail = payload.detail || payload.error || JSON.stringify(payload);
+        throw new Error(detail || ("HTTP " + response.status));
+      }
+      return payload;
+    }
+
+    function formatPercent(value) {
+      return Number.isFinite(value) ? value.toFixed(1) + "%" : "0%";
+    }
+
+    function renderHealth(data) {
+      const rows = [
+        ["status", data.status || "-"],
+        ["policy_version", data.policy_version || "-"],
+        ["policy_loaded_at", data.policy_loaded_at || "-"],
+        ["uptime_seconds", data.uptime_seconds ?? "-"],
+        ["spire_agent_connected", String(data.spire_agent_connected ?? "-")],
+        ["svid_ttl_seconds", data.svid_ttl_seconds ?? "-"],
+      ];
+      healthNode.innerHTML = rows.map(([k, v]) => "<div><strong>" + k + ":</strong> " + v + "</div>").join("");
+    }
+
+    function renderMetrics(data) {
+      const total = data.total_requests || 0;
+      const allowed = data.total_allowed || 0;
+      const denied = data.total_denied || 0;
+      const allowPct = total ? (allowed / total) * 100 : 0;
+      const allowDeg = Math.max(0, Math.min(360, (allowPct / 100) * 360));
+
+      document.getElementById("total-requests").textContent = total;
+      document.getElementById("total-allowed").textContent = allowed;
+      document.getElementById("total-denied").textContent = denied;
+      document.getElementById("allow-rate").textContent = formatPercent(allowPct);
+      document.getElementById("deny-rate").textContent = formatPercent(100 - allowPct);
+      donut.style.background = "conic-gradient(var(--ok) 0deg, var(--ok) " + allowDeg + "deg, var(--deny) " + allowDeg + "deg 360deg)";
+
+      const callers = Object.entries(data.per_caller || {}).sort((a, b) => (b[1].total || 0) - (a[1].total || 0));
+      if (!callers.length) {
+        callerBars.innerHTML = "<div class='muted'>No caller metrics yet.</div>";
+        return;
+      }
+
+      const max = Math.max(...callers.map(([, m]) => m.total || 0), 1);
+      callerBars.innerHTML = callers.map(([caller, m]) => {
+        const pct = ((m.total || 0) / max) * 100;
+        return (
+          "<div class='bar-row'>" +
+            "<div class='bar-label' title='" + caller + "'>" + caller + "</div>" +
+            "<div class='bar-track'><div class='bar-fill' style='width:" + pct.toFixed(2) + "%'></div></div>" +
+            "<div>" + (m.total || 0) + "</div>" +
+          "</div>"
+        );
+      }).join("");
+    }
+
+    function renderAudit(data) {
+      const entries = data.entries || [];
+      if (!entries.length) {
+        auditBody.innerHTML = "<tr><td colspan='7' class='muted'>No audit entries yet.</td></tr>";
+        return;
+      }
+      auditBody.innerHTML = entries.map((entry) => {
+        const badge = entry.decision === "allow"
+          ? "<span class='badge allow'>allow</span>"
+          : "<span class='badge deny'>deny</span>";
+        return (
+          "<tr>" +
+            "<td class='mono'>" + (entry.timestamp || "-") + "</td>" +
+            "<td class='mono'>" + (entry.caller_spiffe_id || "-") + "</td>" +
+            "<td>" + (entry.method || "-") + "</td>" +
+            "<td class='mono'>" + (entry.path || "-") + "</td>" +
+            "<td>" + badge + "</td>" +
+            "<td class='mono'>" + (entry.reason || "-") + "</td>" +
+            "<td>" + ((entry.latency_ms ?? 0) + "ms") + "</td>" +
+          "</tr>"
+        );
+      }).join("");
+    }
+
+    function renderPolicy(policy) {
+      policyEditor.value = JSON.stringify(policy, null, 2);
+      policyStatus.className = "status";
+      policyStatus.textContent = "Policy loaded from runtime.";
+    }
+
+    function updateRefreshTimestamp() {
+      refreshLabel.textContent = "Last refresh: " + new Date().toLocaleTimeString();
+    }
+
+    async function loadDashboard() {
+      try {
+        const [health, metrics, audit] = await Promise.all([
+          fetchJson("/rbac/api/health"),
+          fetchJson("/rbac/api/metrics"),
+          fetchJson("/rbac/api/audit?limit=40"),
+        ]);
+        renderHealth(health);
+        renderMetrics(metrics);
+        renderAudit(audit);
+        updateRefreshTimestamp();
+      } catch (error) {
+        healthNode.innerHTML = "<div class='status error'>Failed to refresh dashboard: " + error.message + "</div>";
+      }
+    }
+
+    async function loadPolicy() {
+      try {
+        const policy = await fetchJson("/rbac/api/policy");
+        renderPolicy(policy);
+      } catch (error) {
+        policyStatus.className = "status error";
+        policyStatus.textContent = "Failed to load policy: " + error.message;
+      }
+    }
+
+    async function applyPolicy() {
+      applyPolicyButton.disabled = true;
+      policyStatus.className = "status";
+      policyStatus.textContent = "Applying policy...";
+      try {
+        const result = await fetchJson("/rbac/api/policy", {
+          method: "PUT",
+          headers: { "Content-Type": "application/x-yaml" },
+          body: policyEditor.value,
+        });
+        policyStatus.className = "status";
+        policyStatus.textContent = "Policy updated: " + JSON.stringify(result);
+        await loadDashboard();
+      } catch (error) {
+        policyStatus.className = "status error";
+        policyStatus.textContent = "Policy update failed: " + error.message;
+      } finally {
+        applyPolicyButton.disabled = false;
+      }
+    }
+
+    refreshButton.addEventListener("click", loadDashboard);
+    reloadPolicyButton.addEventListener("click", loadPolicy);
+    applyPolicyButton.addEventListener("click", applyPolicy);
+
+    loadDashboard();
+    loadPolicy();
+    setInterval(loadDashboard, 2500);
+  </script>
+</body>
+</html>

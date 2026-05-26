@@ -1,0 +1,171 @@
+# =============================================================================
+# Identity Research for Agent Management Using SPIFFE - SPIFFE RBAC + CA Gateway Policy (Budget Backend)
+# =============================================================================
+# Maps to the Budget Backend demo scenario. Demonstrates four enforcement layers:
+#
+#   Layer 4b (CA): Admin governance — agent state, risk blocking, tag matching
+#     evaluated BEFORE developer policies. Admin authority supersedes developer.
+#   Layer 3 (OAuth/JWT): Token validation — Entra Agent ID token with app roles
+#   Layer 2 (RBAC): Path/method authorization — first match wins, default deny
+#   Layer 1 (mTLS): Transport — SPIFFE ID allow list at TLS handshake
+#
+# v5.0: Adds Layer 4 Conditional Access enforcement (admin_governance + ca).
+# Uses Entra Agent Identity Blueprint SPIFFE format:
+#   spiffe://aim.microsoft.com/ests/bp/<blueprint-oid>/aid/<agent-oid>
+# At deploy time, SPIFFE_PREFIX_<NAME> env vars override the base prefix
+# with the real blueprint + agent OIDs via EnrichFromEnv().
+#
+# CA enforcement:
+#   admin_governance.target_agent_tag: this agent's custom attribute tag
+#   ca.agent_state: admin kill switch (enabled/disabled)
+#   ca.agent_tag: caller's custom attribute tag (must match target's tag)
+#   Risk enforcement is driven by Entra CA policy (agentIdRiskLevels), not YAML.
+#   Risk levels pushed via PUT /agent-risk on mgmt API (port 9443)
+#
+# In production, Layer 4a (token-time CA) blocks at Entra STS before token
+# issuance. The PoC simulates CA at Layer 4b (data plane) in the sidecar.
+# =============================================================================
+
+version: "5.0"
+trust_domain: "aim.microsoft.com"
+default_action: deny
+
+# ─── Admin Governance (Layer 4) ───
+admin_governance:
+  enabled: true
+  target_agent_tag: finance            # BudgetBackend is a "finance" resource
+  risk_enforcement: sts                # Entra CA enforces at token issuance (STS)
+
+policies:
+  # ─── BudgetReport: Read-only + finance tag ───
+  # Authenticated caller with valid SPIFFE identity.
+  # CA: finance tag matches → allowed. High risk → blocked.
+  # /budget/read: RBAC allows + JWT requires Budget.Read
+  # /budget/submit: RBAC denies outright (Layer 2 block)
+  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"
+    name: "budget-report"
+    entra_agent_id: ""
+    description: "Read-only access to budget data"
+    ca:
+      agent_state: enabled
+      agent_tag: finance
+    rules:
+      - path: "/budget/read"
+        methods: ["GET", "POST"]
+        action: allow
+        require_jwt: true
+        required_roles: ["Budget.Read"]
+      - path: "/budget/submit"
+        methods: ["POST"]
+        action: deny
+
+  # ─── EmployeeMenus: No tag → blocked at CA layer ───
+  # Defense-in-depth: blocked at mTLS (not in allow list) AND at CA (no tag).
+  # If mTLS somehow passes, CA tag mismatch catches it.
+  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"
+    name: "employee-menus"
+    entra_agent_id: ""
+    description: "No network/STS access - blocked at mTLS + CA tag layers"
+    ca:
+      agent_state: enabled
+      agent_tag: ""                    # No tag → blocked by tag mismatch
+    rules:
+      - path: "/*"
+        methods: ["*"]
+        action: deny
+
+  # ─── BudgetApproval: Full access + finance tag ───
+  # CA: finance tag matches → allowed.
+  # Layer 3: Requires valid JWT with appropriate roles for budget operations.
+  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"
+    name: "budget-approval"
+    entra_agent_id: ""
+    description: "Can read and submit budgets + management access"
+    ca:
+      agent_state: enabled
+      agent_tag: finance
+    rules:
+      - path: "/budget/read"
+        methods: ["GET", "POST"]
+        action: allow
+        require_jwt: true
+        required_roles: ["Budget.Read"]
+      - path: "/budget/submit"
+        methods: ["POST"]
+        action: allow
+        require_jwt: true
+        required_roles: ["Budget.Submit"]
+  # ─── Admin Control Plane: dedicated management access ───
+  # Separate control plane so recovery does not depend on governed agents.
+  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"
+    name: "admin-control-plane"
+    entra_agent_id: ""
+    description: "Dedicated management service"
+    ca:
+      agent_state: enabled
+      agent_tag: admin
+      skip_target_tag_check: true
+    rules:
+      - path: "/mgmt/*"
+        methods: ["GET", "PUT"]
+        action: allow
+
+# =============================================================================
+# Federated Policies — Cross-Cloud Callers (foreign SPIFFE trust domains)
+# =============================================================================
+# Each entry authorizes a caller from a different trust domain.
+# Rules: exact spiffe_id only (no prefix), per-entry trust_domain required.
+# Discovery metadata (invoke_url, display_name) lives in portal external-agent
+# storage — not here. This section is authorization config only.
+#
+# To update the real SPIFFE IDs after provisioning: set them explicitly here
+# using the GCP trust domain (gcp.aim.microsoft.com) and the Blueprint/Agent OIDs
+# resolved from scripts/add-google-agent.sh output.
+# =============================================================================
+federated_policies:
+  # ─── Google Budget Reader ───
+  # GCP-hosted read-only caller via SPIFFE federation + Entra Agent Identity.
+  # Transport: SPIFFE SVID from gcp.aim.microsoft.com trust domain.
+  # Identity: Google OIDC → Blueprint FIC (two-hop) → Entra Agent Identity token.
+  # At deploy time replace these placeholder values using scripts/add-google-agent.sh.
+  - spiffe_id: "spiffe://gcp.aim.microsoft.com/ests/bp/<blueprint-oid>/aid/<google-agent-oid>"
+    trust_domain: "gcp.aim.microsoft.com"
+    name: "google-budget-reader"
+    entra_agent_id: "<google-agent-oid>"
+    description: "Google-hosted read-only caller via SPIFFE federation"
+    ca:
+      agent_state: enabled
+      agent_tag: finance
+    rules:
+      - path: "/budget/read"
+        methods: ["GET", "POST"]
+        action: allow
+        require_jwt: true
+        required_roles: ["Budget.Read"]
+      - path: "/budget/submit"
+        methods: ["*"]
+        action: deny
+
+  # ─── GitHub Budget Reader ───
+  # GitHub Actions-hosted caller via self-hosted runner in Azure VNet.
+  # Transport: SPIFFE SVID from aim.microsoft.com trust domain (same as Azure agents).
+  # Identity: GitHub OIDC → Blueprint FIC (Flexible, claimsMatchingExpression) → Entra Agent Identity token.
+  # Layer 2 (this entry) authorizes the RUNNER. Layer 4b (request-scoped tags) authorizes the REPO/WORKFLOW.
+  # At deploy time replace these placeholder values using scripts/add-github-agent.sh output.
+  - spiffe_id: "spiffe://aim.microsoft.com/ests/bp/<blueprint-oid>/aid/<github-agent-oid>"
+    trust_domain: "aim.microsoft.com"
+    name: "github-budget-reader"
+    entra_agent_id: "<github-agent-oid>"
+    description: "GitHub Actions-hosted caller via self-hosted runner"
+    ca:
+      agent_state: enabled
+      agent_tag: finance
+    rules:
+      - path: "/budget/read"
+        methods: ["GET", "POST"]
+        action: allow
+        require_jwt: true
+        required_roles: ["Budget.Read"]
+      - path: "/budget/submit"
+        methods: ["*"]
+        action: deny

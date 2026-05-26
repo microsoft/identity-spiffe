@@ -1,0 +1,639 @@
+"""
+BudgetApproval - Full-access Caller Agent
+===========================================
+Can both read (/budget/read) and submit (/budget/submit) budgets.
+Serves direct A2A approval-status checks for other agents.
+Management and recovery operations are intentionally handled by the
+dedicated admin control-plane service instead of this governed agent.
+In production, Big vs. Small approval would be separate SPIFFE IDs.
+"""
+import os
+import re
+import logging
+import secrets
+import httpx
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from entra_token_exchange import get_entra_token_async, flush_cached_token, get_last_token_error, get_token_provenance
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(os.getenv("AGENT_NAME", "budget-approval"))
+
+app = FastAPI(
+    title=f"Agent {os.getenv('AGENT_NAME', 'budget-approval')}",
+    description="Identity Research for Agent Management Using SPIFFE: BudgetApproval — full-access caller",
+    version="0.2.0",
+)
+
+BACKEND_ENDPOINT = os.getenv("BACKEND_ENDPOINT", os.getenv("A2_RESOURCE_ENDPOINT", "http://budget-backend:8000"))
+
+# Path validation: only allow /budget/* paths via call-backend-raw.
+# Management and recovery operations use the dedicated admin control plane.
+ALLOWED_PATH_PATTERN = re.compile(r"^/budget/[a-zA-Z0-9_\-\.]+$")
+ALLOWED_METHODS = {"GET", "POST", "PUT", "DELETE"}
+ADMIN_KEY = os.getenv("MGMT_API_KEY", "")
+APPROVAL_ENDPOINT = os.getenv("APPROVAL_ENDPOINT", "")
+
+# Build A2A target URLs dynamically from all A2A_TARGET_URL_* env vars.
+# This supports dynamic agents added via add-demo-agent.sh without code changes.
+A2A_TARGET_URLS = {}
+_A2A_PREFIX = "A2A_TARGET_URL_"
+for _key, _val in os.environ.items():
+    if _key.startswith(_A2A_PREFIX) and _val:
+        _agent = _key[len(_A2A_PREFIX):].lower().replace("_", "-")
+        A2A_TARGET_URLS[_agent] = _val
+# Legacy fallback: APPROVAL_ENDPOINT maps to budget-approval
+if APPROVAL_ENDPOINT and "budget-approval" not in A2A_TARGET_URLS:
+    A2A_TARGET_URLS["budget-approval"] = APPROVAL_ENDPOINT
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy",
+        "agent": os.getenv("AGENT_NAME", "budget-approval"),
+        "role": os.getenv("AGENT_ROLE", "caller"),
+    }
+
+@app.post("/flush-token")
+async def flush_token(request: Request):
+    """Clear the cached Entra token so the next request acquires a fresh one.
+    Use after app role assignments change — new tokens will include updated roles."""
+    if not ADMIN_KEY:
+        return JSONResponse({"error": "mgmt_api_key_not_configured"}, status_code=500)
+    if request.headers.get("X-Spiffe-Admin-Key") != ADMIN_KEY:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    flush_cached_token()
+    return {"status": "flushed", "message": "Token cache cleared. Next request will acquire a fresh token."}
+
+@app.post("/call-backend")
+async def call_backend(action: str = "echo", message: str = "hello from caller"):
+    agent_name = os.getenv("AGENT_NAME", "budget-approval")
+    payload = {"action": action, "params": {"message": message}}
+    headers = {"X-Caller-Agent": agent_name, "Content-Type": "application/json"}
+
+    logger.info(f"[{agent_name}] Calling BudgetBackend at {BACKEND_ENDPOINT}/budget/submit")
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(f"{BACKEND_ENDPOINT}/budget/submit", json=payload, headers=headers)
+        logger.info(f"[{agent_name}] BudgetBackend responded with status {response.status_code}")
+        return {
+            "caller": agent_name,
+            "target": "budget-backend",
+            "http_status": response.status_code,
+            "response": response.json() if response.status_code == 200 else response.text,
+        }
+    except Exception:
+        logger.exception(f"[{agent_name}] Failed to call BudgetBackend")
+        return {"caller": agent_name, "target": "budget-backend", "http_status": 0, "error": "request_failed"}
+
+@app.post("/call-backend-raw")
+async def call_backend_raw(request: Request, method: str = "GET", path: str = "/budget/read", body: str = ""):
+    """Send an HTTP request to BudgetBackend via the SPIFFE egress proxy."""
+    agent_name = os.getenv("AGENT_NAME", "budget-approval")
+    # Require admin key for raw proxy endpoint (closes #20)
+    if not ADMIN_KEY:
+        return JSONResponse({"error": "admin key not configured"}, status_code=500)
+    if not secrets.compare_digest(request.headers.get("X-Spiffe-Admin-Key", ""), ADMIN_KEY):
+        return JSONResponse(
+            {"caller": agent_name, "http_status": 401, "error": "unauthorized"},
+            status_code=401,
+        )
+
+    if method.upper() not in ALLOWED_METHODS:
+        return {"caller": agent_name, "error": f"Method not allowed: {method}", "http_status": 400}
+    if not ALLOWED_PATH_PATTERN.match(path):
+        return {"caller": agent_name, "error": f"Path not allowed: {path}", "http_status": 400}
+
+    url = f"{BACKEND_ENDPOINT}{path}"
+    headers = {"X-Caller-Agent": agent_name, "Content-Type": "application/json"}
+
+    # Include Entra Agent ID token if available (OAuth2 layer)
+    entra_token = await get_entra_token_async()
+    last_err = get_last_token_error()
+    if entra_token:
+        headers["Authorization"] = f"Bearer {entra_token}"
+    elif last_err and "AADSTS53003" in last_err:
+        # CA policy blocked token issuance — report immediately
+        return {
+            "caller": agent_name,
+            "target": "budget-backend",
+            "method": method.upper(),
+            "path": path,
+            "http_status": 403,
+            "response": {
+                "error": "ca_policy_blocked",
+                "enforcement_layer": "conditional_access",
+                "detail": last_err,
+                "message": "Conditional Access policy denied token issuance (AADSTS53003).",
+            },
+        }
+    else:
+        return {
+            "caller": agent_name,
+            "target": "budget-backend",
+            "method": method.upper(),
+            "path": path,
+            "http_status": 401,
+            "response": {
+                "error": "token_acquisition_failed",
+                "enforcement_layer": "authentication",
+                "detail": last_err or "No Entra token available",
+                "message": "Could not acquire an Entra token for authentication.",
+            },
+        }
+
+    request_body = body if body else None
+    if not request_body and method.upper() in ("POST", "PUT", "PATCH"):
+        request_body = '{"amount": 50000, "description": "RBAC test from BudgetApproval"}'
+
+    logger.info(f"[{agent_name}] Raw call: {method} {url}")
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.request(
+                method=method.upper(),
+                url=url,
+                headers=headers,
+                content=request_body,
+            )
+        logger.info(f"[{agent_name}] BudgetBackend responded: {response.status_code}")
+
+        try:
+            resp_body = response.json()
+        except Exception:
+            resp_body = response.text
+
+        result = {
+            "caller": agent_name,
+            "target": "budget-backend",
+            "method": method.upper(),
+            "path": path,
+            "http_status": response.status_code,
+            "response": resp_body,
+        }
+
+        # Include token provenance so callers can see the full exchange tree
+        provenance = get_token_provenance()
+        if provenance:
+            result["token_provenance"] = provenance
+
+        return result
+    except Exception as e:
+        logger.error(f"[{agent_name}] Raw call failed: {e}")
+        return {
+            "caller": agent_name,
+            "target": "budget-backend",
+            "method": method.upper(),
+            "path": path,
+            "http_status": 0,
+            "error": "request_failed",
+        }
+
+
+# ---------------------------------------------------------------------------
+# JWT Validator for A2A (S2S OAuth) — Layer 3 enforcement
+# ---------------------------------------------------------------------------
+# Validates Entra ID JWTs on direct agent-to-agent calls that bypass the
+# SPIFFE proxy. Mirrors the Go proxy's oauth/validator.go logic:
+#   - Fetches JWKS from Entra OIDC discovery (cached)
+#   - Verifies RS256 signature, issuer, audience, expiration
+#   - Extracts oid, roles, appid from claims
+# ---------------------------------------------------------------------------
+
+import threading
+
+try:
+    import jwt as pyjwt
+    from jwt import PyJWKClient, ExpiredSignatureError, InvalidTokenError
+    _JWT_AVAILABLE = True
+except ImportError:
+    _JWT_AVAILABLE = False
+
+ENTRA_TENANT_ID = os.getenv("AZURE_TENANT_ID", "")
+ENTRA_AUDIENCE = os.getenv("ENTRA_OAUTH2_AUDIENCE", "")
+# DEV_MODE=true allows unauthenticated A2A calls with X-Caller-Agent fallback.
+# In production this MUST be false — JWT is required.
+DEV_MODE = os.getenv("DEV_MODE", "false").lower() in ("true", "1", "yes")
+if DEV_MODE:
+    logging.getLogger(os.getenv("AGENT_NAME", "budget-approval")).critical(
+        "DEV_MODE is enabled — JWT validation is BYPASSED for A2A calls. "
+        "This MUST be disabled in production."
+    )
+    if ENTRA_TENANT_ID:
+        logging.getLogger(os.getenv("AGENT_NAME", "budget-approval")).critical(
+            "AZURE_TENANT_ID is set but DEV_MODE is enabled — refusing to start. "
+            "Unset DEV_MODE or AZURE_TENANT_ID."
+        )
+        import sys
+        sys.exit(1)
+
+_jwks_client = None
+_jwks_lock = threading.Lock()
+
+
+def _get_jwks_client():
+    """Lazily create a cached JWKS client for the configured tenant."""
+    global _jwks_client
+    if _jwks_client is not None:
+        return _jwks_client
+    with _jwks_lock:
+        if _jwks_client is not None:
+            return _jwks_client
+        if not ENTRA_TENANT_ID:
+            return None
+        jwks_url = (
+            f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}"
+            f"/discovery/v2.0/keys"
+        )
+        _jwks_client = PyJWKClient(jwks_url, cache_keys=True, lifespan=3600)
+        return _jwks_client
+
+
+def validate_entra_jwt(token_str: str):
+    """Validate an Entra ID JWT and return claims, or None on failure.
+
+    Checks: RS256 signature via JWKS, issuer (v1 + v2), audience
+    (with/without api:// prefix), and expiration.
+    Returns dict with keys: oid, appid, roles, tid, sub, iss, aud.
+    """
+    if not _JWT_AVAILABLE:
+        logger.error("PyJWT not installed — cannot validate JWTs")
+        return None
+    if not ENTRA_TENANT_ID or not ENTRA_AUDIENCE:
+        logger.warning("JWT validation not configured (missing AZURE_TENANT_ID or ENTRA_OAUTH2_AUDIENCE)")
+        return None
+
+    jwks = _get_jwks_client()
+    if jwks is None:
+        return None
+
+    try:
+        signing_key = jwks.get_signing_key_from_jwt(token_str)
+    except Exception as e:
+        logger.warning(f"JWKS key lookup failed: {e}")
+        return None
+
+    # Accept both v1 and v2 Entra issuers
+    valid_issuers = [
+        f"https://sts.windows.net/{ENTRA_TENANT_ID}/",
+        f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}/v2.0",
+    ]
+
+    # Accept audience with/without api:// prefix
+    valid_audiences = [ENTRA_AUDIENCE]
+    if not ENTRA_AUDIENCE.startswith("api://"):
+        valid_audiences.append(f"api://{ENTRA_AUDIENCE}")
+    else:
+        valid_audiences.append(ENTRA_AUDIENCE.removeprefix("api://"))
+
+    try:
+        claims = pyjwt.decode(
+            token_str,
+            signing_key.key,
+            algorithms=["RS256"],
+            issuer=valid_issuers,
+            audience=valid_audiences,
+            options={"require": ["exp", "iss", "aud"]},
+        )
+        return {
+            "oid": claims.get("oid", ""),
+            "appid": claims.get("appid", claims.get("azp", "")),
+            "roles": claims.get("roles", []),
+            "tid": claims.get("tid", ""),
+            "sub": claims.get("sub", ""),
+            "iss": claims.get("iss", ""),
+            "aud": claims.get("aud", ""),
+        }
+    except ExpiredSignatureError:
+        logger.warning("JWT expired")
+        return None
+    except InvalidTokenError as e:
+        logger.warning(f"JWT validation failed: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# A2A Endpoints — direct caller path and direct target path
+# ---------------------------------------------------------------------------
+
+RISK_STORE_URL = os.getenv("RISK_STORE_URL", "")
+ADMIN_CONTROL_PLANE_ENDPOINT = os.getenv("ADMIN_CONTROL_PLANE_ENDPOINT", "")
+MGMT_API_KEY = os.getenv("MGMT_API_KEY", "")
+AGENT_TAG = os.getenv("AGENT_TAG", "finance")
+
+# Build MI client ID → agent name mapping dynamically from all MI_CLIENT_ID_* env vars.
+# deploy.sh sets MI_CLIENT_ID_BUDGET_REPORT, MI_CLIENT_ID_BUDGET_APPROVAL, etc.
+# This supports dynamic agents whose JWT appid needs resolution.
+_MI_TO_AGENT = {}
+_MI_PREFIX = "MI_CLIENT_ID_"
+for _key, _val in os.environ.items():
+    if _key.startswith(_MI_PREFIX) and _val:
+        _agent = _key[len(_MI_PREFIX):].lower().replace("_", "-")
+        _MI_TO_AGENT[_val] = _agent
+
+_ENTRA_ID_TO_AGENT = {}
+_ENTRA_ID_PREFIX = "ENTRA_AGENT_ID_"
+for _key, _val in os.environ.items():
+    if _key.startswith(_ENTRA_ID_PREFIX) and _val and _key != "ENTRA_AGENT_ID":
+        _agent = _key[len(_ENTRA_ID_PREFIX):].lower().replace("_", "-")
+        _ENTRA_ID_TO_AGENT[_val] = _agent
+
+
+def resolve_caller_name(jwt_claims):
+    """Resolve a JWT's appid/oid to an agent name using Agent Identity or MI client ID mapping."""
+    if jwt_claims:
+        appid = jwt_claims.get("appid", "")
+        if appid in _ENTRA_ID_TO_AGENT:
+            return _ENTRA_ID_TO_AGENT[appid]
+        if appid in _MI_TO_AGENT:
+            return _MI_TO_AGENT[appid]
+    return ""
+
+
+def _spiffe_id_matches_caller(spiffe_id: str, caller_identifier: str) -> bool:
+    """Check if a SPIFFE ID matches a caller identifier.
+
+    Handles both UUID-based IDs (spiffe://domain/ests/bp/<uuid>/aid/<uuid>)
+    and name-based resolution. The caller_identifier may be an agent name
+    (e.g. 'budget-report') or a UUID (OID/appid from JWT).
+    """
+    if not spiffe_id or not caller_identifier:
+        return False
+    # Match caller as a full path segment in the SPIFFE URI or exact match
+    if spiffe_id.endswith("/" + caller_identifier) or caller_identifier == spiffe_id:
+        return True
+    # Reverse: check if the SPIFFE ID's agent segment matches via the policy name mapping.
+    # The admin-control-plane policy has name fields that map SPIFFE IDs to agent names.
+    # For local matching: check if this agent's env-configured SPIFFE ID matches.
+    own_name = os.getenv("AGENT_NAME", "")
+    if caller_identifier == own_name:
+        own_spiffe = os.getenv("SPIFFE_ID", "")
+        if own_spiffe and own_spiffe == spiffe_id:
+            return True
+    return False
+
+
+async def _query_risk_store(caller_identifier: str) -> str:
+    """Query the dedicated admin control-plane for a caller's risk level."""
+    mgmt_base = RISK_STORE_URL or ADMIN_CONTROL_PLANE_ENDPOINT
+    if not mgmt_base:
+        return "low"
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            headers = {}
+            if MGMT_API_KEY:
+                headers["X-Spiffe-Admin-Key"] = MGMT_API_KEY
+            # First try the risk store
+            resp = await client.get(f"{mgmt_base}/admin/agent-risk", headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                for spiffe_id, risk in data.get("risks", {}).items():
+                    if _spiffe_id_matches_caller(spiffe_id, caller_identifier):
+                        return risk
+            # If caller is a resolved name, also look up its SPIFFE ID from policy
+            # and try matching that against the risk store
+            if caller_identifier and not caller_identifier.startswith("spiffe://"):
+                pol_resp = await client.get(f"{mgmt_base}/admin/policy", headers=headers)
+                if pol_resp.status_code == 200:
+                    policy = pol_resp.json()
+                    # Find the caller's SPIFFE ID from the policy
+                    caller_spiffe = ""
+                    for p in policy.get("policies", []):
+                        if p.get("name") == caller_identifier:
+                            caller_spiffe = p.get("spiffe_id_prefix", "") or p.get("spiffe_id", "")
+                            break
+                    if caller_spiffe:
+                        risk_data = data if resp.status_code == 200 else {}
+                        for spiffe_id, risk in risk_data.get("risks", {}).items():
+                            if spiffe_id.startswith(caller_spiffe) or spiffe_id == caller_spiffe:
+                                return risk
+    except Exception as e:
+        logger.warning(f"Risk store query failed: {e}")
+    return "low"
+
+
+async def _query_caller_ca(caller_identifier: str) -> dict:
+    """Query admin control-plane for a caller's CA config (state + tag)."""
+    mgmt_base = RISK_STORE_URL or ADMIN_CONTROL_PLANE_ENDPOINT
+    if not mgmt_base:
+        return {"agent_state": "", "agent_tag": ""}
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            headers = {}
+            if MGMT_API_KEY:
+                headers["X-Spiffe-Admin-Key"] = MGMT_API_KEY
+            resp = await client.get(f"{mgmt_base}/admin/policy", headers=headers)
+            if resp.status_code == 200:
+                policy = resp.json()
+                for p in policy.get("policies", []):
+                    eid = p.get("entra_agent_id", "")
+                    name = p.get("name", "")
+                    spiffe_id = p.get("spiffe_id_prefix", "") or p.get("spiffe_id", "")
+                    if (eid and caller_identifier == eid) or (caller_identifier == name) or (caller_identifier in spiffe_id):
+                        ca = p.get("ca", {})
+                        return {
+                            "agent_state": ca.get("agent_state", "enabled"),
+                            "agent_tag": ca.get("agent_tag", ""),
+                        }
+    except Exception as e:
+        logger.warning(f"Policy store query failed: {e}")
+    return {"agent_state": "", "agent_tag": ""}
+
+
+async def _call_target(target: str):
+    agent_name = os.getenv("AGENT_NAME", "budget-approval")
+    target_url = (A2A_TARGET_URLS.get(target) or "").rstrip("/")
+    if not target_url:
+        return {"caller": agent_name, "target": target, "http_status": 0, "error": f"Target not configured: {target}"}
+
+    headers = {"X-Caller-Agent": agent_name, "Content-Type": "application/json"}
+    entra_token = await get_entra_token_async()
+    if entra_token:
+        headers["Authorization"] = f"Bearer {entra_token}"
+    else:
+        # Token acquisition failed — check for specific CA policy block error
+        is_ca_block = get_last_token_error() and "AADSTS53003" in get_last_token_error()
+        return {
+            "caller": agent_name,
+            "target": target,
+            "http_status": 403 if is_ca_block else 401,
+            "response": {
+                "error": "ca_policy_blocked" if is_ca_block else "token_acquisition_failed",
+                "enforcement_layer": "conditional_access" if is_ca_block else "authentication",
+                "detail": get_last_token_error() or "No Entra token available",
+                "message": "Conditional Access policy denied token issuance for this agent (AADSTS53003). "
+                           "The agent is flagged as high-risk and the CA policy blocks high-risk agents."
+                           if is_ca_block else "Could not acquire an Entra token for A2A authentication.",
+            },
+        }
+
+    logger.info(f"[{agent_name}] A2A call to {target} at {target_url}/a2a/status")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{target_url}/a2a/status", headers=headers)
+        try:
+            resp_body = resp.json()
+        except Exception:
+            resp_body = resp.text
+        return {
+            "caller": agent_name,
+            "target": target,
+            "http_status": resp.status_code,
+            "response": resp_body,
+        }
+    except Exception:
+        logger.exception(f"[{agent_name}] A2A call failed")
+        return {"caller": agent_name, "target": target, "http_status": 0, "error": "request_failed"}
+
+
+@app.get("/call-agent")
+async def call_agent(target: str):
+    return await _call_target(target)
+
+
+@app.get("/approval/status")
+async def approval_status(request: Request):
+    """A2A endpoint: Returns approval queue status.
+
+    Called directly by BudgetReport over HTTPS (S2S OAuth).
+    Enforces Layer 3 (JWT) + Layer 4b (risk + tag) at app layer.
+
+    Layer 3: JWT is REQUIRED. The token must be a valid Entra ID JWT with
+    correct signature, issuer, audience, and expiration. Caller identity
+    is extracted from the token's oid claim.
+
+    Layer 4b: Risk + tag checks run after JWT validation.
+
+    DEV_MODE=true bypasses JWT validation and uses X-Caller-Agent header
+    as caller identity. This is for local testing only — never in production.
+    """
+    agent_name = os.getenv("AGENT_NAME", "budget-approval")
+    auth_header = request.headers.get("Authorization", "")
+
+    # --- Layer 3: JWT Validation ---
+    jwt_claims = None
+    if auth_header.startswith("Bearer "):
+        token_str = auth_header[7:]
+        jwt_claims = validate_entra_jwt(token_str)
+        if jwt_claims is None:
+            logger.warning(f"[{agent_name}] A2A rejected: invalid JWT")
+            return JSONResponse({
+                "error": "invalid_token",
+                "enforcement_layer": "jwt",
+                "message": "JWT validation failed (signature, issuer, audience, or expiration)",
+            }, status_code=401)
+        logger.info(f"[{agent_name}] A2A JWT validated: oid={jwt_claims['oid']} appid={jwt_claims['appid']} roles={jwt_claims['roles']}")
+        # Resolve the MI client ID (appid) to an agent name for risk/tag lookups.
+        # The oid is the MI principal ID; appid is the MI client ID — we map appid
+        # to agent name using env vars set by deploy.sh.
+        caller_id = resolve_caller_name(jwt_claims) or jwt_claims["oid"] or jwt_claims["appid"]
+        logger.info(f"[{agent_name}] Resolved caller: {caller_id}")
+    elif DEV_MODE:
+        # Dev mode: allow unauthenticated calls with X-Caller-Agent
+        caller_id = request.headers.get("X-Caller-Agent", "unknown")
+        logger.warning(f"[{agent_name}] A2A DEV_MODE: no JWT, using X-Caller-Agent={caller_id}")
+    else:
+        logger.warning(f"[{agent_name}] A2A rejected: no Bearer token (JWT required)")
+        return JSONResponse({
+            "error": "missing_token",
+            "enforcement_layer": "jwt",
+            "message": "Authorization header with Bearer token is required",
+        }, status_code=401)
+
+    # --- Layer 4b: Agent state check (admin kill switch) ---
+    # Fetch caller's CA config from the RBAC policy. If agent_state is
+    # "disabled", block immediately — this is the admin isolation switch.
+    caller_ca = await _query_caller_ca(caller_id)
+    if caller_ca["agent_state"] == "disabled":
+        logger.warning(f"[{agent_name}] A2A blocked: {caller_id} agent_state=disabled")
+        return JSONResponse({
+            "error": "agent_disabled",
+            "enforcement_layer": "conditional_access",
+            "caller": caller_id,
+        }, status_code=403)
+
+    # --- Layer 4b: Risk check (CA policy-driven) ---
+    # Read CA policy from Entra Graph API to determine blocked risk levels,
+    # then check caller's risk from Entra ID Protection riskyAgents API.
+    # Entra is the sole source of truth. FAIL CLOSED if unavailable.
+    caller_oid = jwt_claims["oid"] if jwt_claims else caller_id
+    from ca_evaluator import get_evaluator
+    ca_eval = get_evaluator()
+    blocked, ca_details = await ca_eval.should_block_caller(caller_oid)
+    if blocked:
+        logger.warning(f"[{agent_name}] A2A blocked by CA policy: {caller_id} details={ca_details}")
+        return JSONResponse({
+            "error": "agent_risk_blocked",
+            "enforcement_layer": "conditional_access",
+            "agent_risk": ca_details.get("agent_risk", "unknown"),
+            "caller": caller_id,
+            "enforcement": {
+                "jwt_validated": jwt_claims is not None,
+                "jwt_oid": jwt_claims["oid"] if jwt_claims else None,
+                "jwt_roles": jwt_claims["roles"] if jwt_claims else None,
+                "risk_level": ca_details.get("agent_risk", "unknown"),
+                "enforcement_source": ca_details.get("enforcement_source", "unknown"),
+                "blocked_risk_levels": ca_details.get("blocked_risk_levels", []),
+                "ca_policy_ids": ca_details.get("ca_policy_ids", []),
+                "tag_match": False,
+                "caller_tag": None,
+                "target_tag": AGENT_TAG,
+                "layer": "3_jwt + 4b_ca_policy",
+            },
+        }, status_code=403)
+
+    # --- Layer 4b: Tag match ---
+    caller_tag = caller_ca["agent_tag"]
+    if caller_tag.lower() != AGENT_TAG.lower():
+        logger.warning(f"[{agent_name}] A2A blocked: {caller_id} tag={caller_tag!r} != {AGENT_TAG!r}")
+        return JSONResponse({
+            "error": "agent_tag_mismatch",
+            "enforcement_layer": "conditional_access",
+            "caller_tag": caller_tag,
+            "target_tag": AGENT_TAG,
+            "caller": caller_id,
+            "enforcement": {
+                "jwt_validated": jwt_claims is not None,
+                "jwt_oid": jwt_claims["oid"] if jwt_claims else None,
+                "jwt_roles": jwt_claims["roles"] if jwt_claims else None,
+                "risk_level": ca_details.get("agent_risk", "unknown"),
+                "tag_match": False,
+                "caller_tag": caller_tag,
+                "target_tag": AGENT_TAG,
+                "layer": "3_jwt + 4b_app_layer",
+            },
+        }, status_code=403)
+
+    # --- Business logic ---
+    entra_risk = ca_details.get("agent_risk", "none")
+    logger.info(f"[{agent_name}] A2A allowed: {caller_id} (entra_risk={entra_risk}, tag={caller_tag})")
+    return {
+        "status": "ok",
+        "agent": agent_name,
+        "approval_queue": [
+            {"budget_id": "BUD-2026-001", "status": "pending_approval", "amount": 50000, "requester": "budget-report"},
+            {"budget_id": "BUD-2026-002", "status": "approved", "amount": 12000, "requester": "budget-report"},
+            {"budget_id": "BUD-2026-003", "status": "rejected", "amount": 250000, "requester": "budget-report"},
+        ],
+        "caller": caller_id,
+        "enforcement": {
+            "jwt_validated": jwt_claims is not None,
+            "jwt_oid": jwt_claims["oid"] if jwt_claims else None,
+            "jwt_roles": jwt_claims["roles"] if jwt_claims else None,
+            "risk_level": entra_risk,
+            "risk_source": ca_details.get("risk_source", "entra_id_protection"),
+            "tag_match": True,
+            "caller_tag": caller_tag,
+            "target_tag": AGENT_TAG,
+            "layer": "3_jwt + 4b_app_layer",
+        },
+    }
+
+
+@app.get("/a2a/status")
+async def a2a_status(request: Request):
+    return await approval_status(request)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

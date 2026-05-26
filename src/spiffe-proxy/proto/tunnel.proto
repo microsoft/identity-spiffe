@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package tunnel.v1;
+
+option go_package = "github.com/microsoft/identity-spiffe/src/spiffe-proxy/internal/tunnel/tunnelpb";
+
+// TunnelService provides secure transport between egress and ingress proxies.
+// Tunnels arbitrary TCP/HTTP traffic over mTLS-secured gRPC.
+service TunnelService {
+  // Bidirectional stream for tunneling any protocol
+  rpc Tunnel(stream TunnelMessage) returns (stream TunnelMessage);
+  
+  // Health check for the tunnel endpoint
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message TunnelMessage {
+  string connection_id = 1;
+  bytes payload = 2;
+  MessageType type = 3;
+  map<string, string> metadata = 4;
+}
+
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_DATA = 1;
+  MESSAGE_TYPE_CONNECT = 2;
+  MESSAGE_TYPE_DISCONNECT = 3;
+  MESSAGE_TYPE_ERROR = 4;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string spiffe_id = 2;
+  string version = 3;
+}

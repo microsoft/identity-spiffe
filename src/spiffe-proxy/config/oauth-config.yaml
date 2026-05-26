@@ -1,0 +1,14 @@
+# =============================================================================
+# Identity Research for Agent Management Using SPIFFE — OAuth/JWT Configuration (Layer 3)
+# =============================================================================
+# Configures JWT validation for Entra Agent Identity tokens.
+# Values here are defaults — AZURE_TENANT_ID and ENTRA_OAUTH2_AUDIENCE
+# env vars override at runtime (injected by deploy.sh).
+#
+# When this file is absent, the JWT validator is nil and require_jwt rules
+# fail closed (denied with 503 "jwt_validator_unavailable").
+# =============================================================================
+
+tenant_id: ""
+audience: ""
+jwks_cache_ttl_seconds: 86400

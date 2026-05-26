@@ -1,0 +1,75 @@
+site_name: Identity Research for Agent Management Using SPIFFE
+site_description: Developer and architecture documentation for Identity Research for Agent Management Using SPIFFE.
+site_url: https://microsoft.github.io/identity-spiffe/
+repo_url: https://github.com/microsoft/identity-spiffe
+repo_name: microsoft/identity-spiffe
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.expand
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quickstart: getting-started/quickstart.md
+      - Deployment Sequence: architecture/deployment-sequence.md
+      - Portal Cloud Deployment: architecture/portal-cloud-deployment.md
+  - Architecture:
+      - System Overview: architecture/system-overview.md
+      - Enforcement Flow: architecture/enforcement-flow.md
+      - Admin Governance Layer: architecture/admin-governance-layer.md
+      - Layers:
+          - Transport mTLS: architecture/layers/transport-mtls.md
+          - RBAC Authorization: architecture/layers/rbac-authorization.md
+          - OAuth2 and JWT: architecture/layers/oauth-jwt.md
+          - Conditional Access Governance: architecture/layers/conditional-access.md
+      - Reference Designs:
+          - Google Cloud Agent Federation: architecture/next-google-cloud-agent-federation.md
+          - GitHub Actions Agent Federation: architecture/next-github-actions-agent-federation.md
+  - Reference:
+      - Management APIs: reference/management-apis.md
+      - Authentication Flows: reference/authentication-flows.md
+  - Developer Guide:
+      - Portal Runtime: developer/portal-runtime.md
+      - Parallel Deployments: developer/parallel-deployments.md
+      - Docs Site: developer/docs-site.md
+  - Runbooks:
+      - Hard-Won Learnings: runbooks/hard-won-learnings.md
+      - SPIRE Operations: runbooks/spire-operations.md
+      - Container Apps Quirks: runbooks/container-apps-quirks.md
+  - Decision Records:
+      - ADR Index: decisions/README.md
+      - ADR-001 Sidecar, not gateway: decisions/001-sidecar-not-gateway.md
+      - ADR-002 SPIFFE, not custom mTLS: decisions/002-spiffe-not-custom-mtls.md
+      - ADR-003 Join token attestation: decisions/003-join-token-attestation.md
+      - ADR-004 Transparent proxy, not SDK: decisions/004-transparent-proxy-not-sdk.md
+      - ADR-005 SPIRE, not Istio: decisions/005-spire-not-istio.md
+      - ADR-006 Budget Backend scenario: decisions/006-budget-backend-scenario.md
+      - ADR-007 Container Apps, not AKS: decisions/007-container-apps-not-aks.md
+      - ADR-008 OPA complementary, not replacement: decisions/008-opa-complementary-not-replacement.md
+      - ADR-009 Remove Foundry: decisions/009-remove-foundry.md
+      - ADR-010 Conditional Access as admin governance: decisions/010-conditional-access-admin-governance.md
+  - Platform Learnings:
+      - Conditional Access Learnings: platform-learnings/Conditional-Access-Learnings.md
+      - Agent ID Blueprints and Users: platform-learnings/agent-id-blueprints-and-users.md
+      - Google Cloud Federation: platform-learnings/Google-Cloud-Federation.md
+      - GitHub Actions Federation: platform-learnings/GitHub-Actions-Federation.md
+      - Amazon Web Services Federation: platform-learnings/Amazon-Web-Services-Federation.md
+      - ServiceNow Federation: platform-learnings/ServiceNow-Federation.md

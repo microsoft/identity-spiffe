@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+#
+# Identity Research for Agent Management Using SPIFFE - Agent Identity Security PoC (Budget Backend Scenario)
+# ====================================================================
+# Phase 2: SPIFFE/SPIRE sidecar enforcement — Budget Backend demo
+#
+# Maps to the end-to-end budget authorization demo:
+#   BudgetBackend  — Protected MCP server exposing /budget/read and /budget/submit
+#   BudgetReport   — Read-only caller (RBAC allows /budget/read, denies /budget/submit)
+#   EmployeeMenus  — No network trust (blocked at mTLS handshake)
+#   BudgetApproval — Full access to both /budget/read and /budget/submit
+#
+# Usage:
+#   azd auth login
+#   ./deploy.sh                    # Full Phase 2 deployment
+#   python scripts/test_agents.py  # Validate enforcement matrix
+#   azd down --purge               # Tear down
+#
+name: identity-spiffe
+metadata:
+  template: identity-spiffe@0.2.0
+
+infra:
+  provider: bicep
+  path: ./infra
+
+services:
+  # SPIRE Server is NOT deployed via azd deploy — its image is set
+  # by the spiffeProxyImage Bicep param during azd provision.
+
+  # =========================================================================
+  # BudgetReport - Read-only caller + SPIFFE egress proxy sidecar
+  # =========================================================================
+  budget-report:
+    project: ./src/budget-report
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      remoteBuild: true
+
+  # =========================================================================
+  # BudgetBackend - Protected MCP Server + SPIFFE ingress proxy sidecar
+  # =========================================================================
+  budget-backend:
+    project: ./src/budget-backend
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      remoteBuild: true
+
+  # =========================================================================
+  # EmployeeMenus - Blocked caller + SPIFFE egress proxy sidecar
+  # =========================================================================
+  employee-menus:
+    project: ./src/employee-menus
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      remoteBuild: true
+
+  # =========================================================================
+  # BudgetApproval - Full-access caller + SPIFFE egress proxy sidecar
+  # =========================================================================
+  budget-approval:
+    project: ./src/budget-approval
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      remoteBuild: true
+
+  # =========================================================================
+  # Admin Control Plane - dedicated management service + SPIFFE egress proxy
+  # =========================================================================
+  admin-control-plane:
+    project: ./src/admin-control-plane
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      remoteBuild: true
+
+pipeline:
+  provider: github

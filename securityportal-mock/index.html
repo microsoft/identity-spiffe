@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Portal Mock — Agent Threat Intelligence</title>
+    <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #060610;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 0;
+            overflow-x: hidden;
+        }
+        /* Animated grid background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background:
+                linear-gradient(rgba(255,40,40,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,40,40,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .page-wrap { position: relative; z-index: 1; padding: 0 24px 24px; }
+
+        /* Globe / threat map canvas */
+        .threat-map {
+            position: relative;
+            width: 100%;
+            height: 280px;
+            overflow: hidden;
+            margin-bottom: 0;
+            background: radial-gradient(ellipse at 50% 50%, #080818 0%, #040410 100%);
+        }
+        .threat-map canvas { width: 100%; height: 100%; }
+
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px 24px 16px;
+            border-bottom: 1px solid #1a1a2e;
+            background: linear-gradient(180deg, #0c0c18 0%, #060610 100%);
+        }
+        .header-logo {
+            width: 40px; height: 40px;
+            display: flex; align-items: center; justify-content: center;
+            background: radial-gradient(circle, #ff2020 0%, #880000 100%);
+            border-radius: 50%;
+            font-size: 20px;
+            box-shadow: 0 0 20px rgba(255,40,40,0.4), 0 0 60px rgba(255,40,40,0.1);
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(255,40,40,0.4), 0 0 60px rgba(255,40,40,0.1); }
+            50% { box-shadow: 0 0 30px rgba(255,40,40,0.6), 0 0 80px rgba(255,40,40,0.2); }
+        }
+        .header h1 {
+            font-size: 20px;
+            color: #ff3333;
+            font-weight: 700;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+        .header .subtitle {
+            color: #555;
+            font-size: 12px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .badge {
+            background: rgba(255,40,40,0.1);
+            border: 1px solid #ff3333;
+            color: #ff3333;
+            padding: 3px 10px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .stats-bar {
+            display: flex;
+            gap: 24px;
+            padding: 12px 24px;
+            background: #0a0a16;
+            border-bottom: 1px solid #1a1a2e;
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .stats-bar .stat-val { color: #ff3333; font-weight: 700; font-size: 13px; margin-right: 4px; }
+        .stats-bar .stat-ok { color: #44ff44; }
+
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+        .agent-card {
+            background: linear-gradient(135deg, #0e0e1a 0%, #12121e 100%);
+            border: 1px solid #1a1a2e;
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .agent-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #44ff44, transparent);
+            opacity: 0.5;
+        }
+        .agent-card:hover { border-color: #333; transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+        .agent-card.risk-high { border-left: 3px solid #ff2020; }
+        .agent-card.risk-high::before { background: linear-gradient(90deg, transparent, #ff2020, transparent); opacity: 1; }
+        .agent-card.risk-medium { border-left: 3px solid #ffaa00; }
+        .agent-card.risk-medium::before { background: linear-gradient(90deg, transparent, #ffaa00, transparent); }
+        .agent-card.risk-low { border-left: 3px solid #44ff44; }
+        .agent-name {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .agent-name .threat-icon { font-size: 14px; }
+        .agent-spiffe {
+            font-size: 10px;
+            color: #444;
+            word-break: break-all;
+            margin-bottom: 8px;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        .risk-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .risk-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .risk-indicator.low { background: #44ff44; box-shadow: 0 0 8px #44ff4466; }
+        .risk-indicator.medium { background: #ffaa00; box-shadow: 0 0 8px #ffaa0066; }
+        .risk-indicator.high { background: #ff2020; box-shadow: 0 0 12px #ff202088; animation: blink-red 1s ease-in-out infinite; }
+        @keyframes blink-red { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .tag-badge-finance { color: #4488ff; font-size: 10px; font-family: monospace; }
+        .tag-badge-none { color: #ff6666; font-size: 10px; font-family: monospace; }
+        select {
+            background: #0e0e1a;
+            color: #bbb;
+            border: 1px solid #2a2a3a;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        select:focus { outline: none; border-color: #ff3333; }
+        button {
+            background: linear-gradient(135deg, #cc0000 0%, #ff2020 100%);
+            color: white;
+            border: none;
+            padding: 5px 14px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+        }
+        button:hover { background: linear-gradient(135deg, #ff2020 0%, #ff4444 100%); box-shadow: 0 0 16px rgba(255,40,40,0.3); }
+        button:disabled { background: #222; cursor: not-allowed; box-shadow: none; }
+        .status-bar {
+            background: #0e0e1a;
+            border: 1px solid #1a1a2e;
+            border-radius: 4px;
+            padding: 10px 16px;
+            margin: 0 24px 16px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        .status-bar .success { color: #44ff44; }
+        .status-bar .error { color: #ff2020; }
+        .status-bar .info { color: #4488ff; }
+        .footer {
+            margin-top: 32px;
+            padding: 16px 24px;
+            border-top: 1px solid #1a1a2e;
+            color: #333;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .footer a { color: #ff3333; text-decoration: none; }
+        .footer code { color: #555; font-size: 10px; }
+        .section-label {
+            font-size: 11px;
+            color: #444;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 12px;
+            padding-left: 24px;
+        }
+        /* ── Auth styles (dark theme) ── */
+        .sp-auth-splash { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: #060610; }
+        .sp-auth-card { text-align: center; padding: 48px 56px; background: #0c0c18; border: 1px solid #1a1a2e; border-radius: 12px; max-width: 420px; }
+        .sp-auth-logo { width: 56px; height: 56px; border-radius: 50%; background: radial-gradient(circle, #ff2020 0%, #880000 100%); color: #fff; font-size: 20px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; box-shadow: 0 0 20px rgba(255,40,40,0.3); }
+        .sp-auth-title { font-size: 22px; font-weight: 600; color: #e0e0e0; margin-bottom: 4px; }
+        .sp-auth-sub { font-size: 13px; color: #666; margin-bottom: 28px; }
+        .sp-auth-btn { display: inline-flex; align-items: center; gap: 10px; padding: 10px 24px; border: 1px solid #333; border-radius: 6px; background: #1a1a2e; font-size: 14px; font-weight: 500; cursor: pointer; color: #e0e0e0; transition: all 0.15s; font-family: inherit; }
+        .sp-auth-btn:hover { background: #252540; border-color: #ff2020; }
+        .sp-auth-btn svg { width: 20px; height: 20px; }
+        .sp-auth-error { margin-top: 16px; padding: 10px 14px; border-radius: 6px; background: rgba(255,40,40,0.1); color: #ff4444; font-size: 12px; border: 1px solid rgba(255,40,40,0.3); display: none; }
+        .sp-auth-loading { margin-top: 16px; font-size: 13px; color: #666; display: none; }
+        .sp-user-banner { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+        .sp-user-avatar { width: 28px; height: 28px; border-radius: 50%; background: #ff2020; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+        .sp-user-name { font-size: 12px; color: #888; }
+        .sp-user-role { font-size: 10px; color: #ff2020; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .sp-signout { padding: 3px 8px; border: 1px solid #333; border-radius: 3px; background: transparent; color: #666; font-size: 10px; cursor: pointer; font-family: inherit; }
+        .sp-signout:hover { border-color: #ff2020; color: #ff2020; }
+
+        /* ── Isolation kill switch styles ── */
+        .agent-card.isolated {
+            border: 2px solid #ff2020 !important;
+            border-left: 4px solid #ff2020 !important;
+            background: linear-gradient(135deg, #1a0808 0%, #160606 100%) !important;
+            box-shadow: 0 0 24px rgba(255,20,20,0.15), inset 0 0 40px rgba(255,20,20,0.03);
+        }
+        .agent-card.isolated::before {
+            background: linear-gradient(90deg, transparent, #ff2020, transparent) !important;
+            opacity: 1 !important;
+            animation: sweep-red 2s linear infinite;
+        }
+        @keyframes sweep-red {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        .isolated-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255,20,20,0.15);
+            border: 1px solid #ff2020;
+            color: #ff4444;
+            padding: 3px 10px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-top: 8px;
+            animation: blink-red 1.5s ease-in-out infinite;
+        }
+        .isolation-layers {
+            margin-top: 10px;
+            padding: 10px 12px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 4px;
+            border: 1px solid #1a1a2e;
+        }
+        .isolation-layers .layer-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            padding: 3px 0;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        .layer-item .layer-check { color: #ff2020; font-size: 12px; }
+        .layer-item .layer-check.ok { color: #44ff44; }
+        .layer-item .layer-name { color: #888; min-width: 60px; }
+        .layer-item .layer-detail { color: #ccc; }
+        .isolate-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .btn-isolate {
+            background: linear-gradient(135deg, #880000 0%, #cc0000 100%) !important;
+            padding: 7px 18px !important;
+            font-size: 11px !important;
+            letter-spacing: 2px !important;
+            border: 1px solid #ff2020 !important;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+            justify-content: center;
+        }
+        .btn-isolate:hover {
+            background: linear-gradient(135deg, #cc0000 0%, #ff2020 100%) !important;
+            box-shadow: 0 0 20px rgba(255,40,40,0.4) !important;
+        }
+        .btn-restore {
+            background: linear-gradient(135deg, #004400 0%, #006600 100%) !important;
+            padding: 7px 18px !important;
+            font-size: 11px !important;
+            letter-spacing: 2px !important;
+            border: 1px solid #44ff44 !important;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+            justify-content: center;
+        }
+        .btn-restore:hover {
+            background: linear-gradient(135deg, #006600 0%, #00aa00 100%) !important;
+            box-shadow: 0 0 20px rgba(68,255,68,0.3) !important;
+        }
+        /* Confirmation overlay */
+        .confirm-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .confirm-card {
+            background: #0e0e1a;
+            border: 2px solid #ff2020;
+            border-radius: 12px;
+            padding: 32px 40px;
+            max-width: 480px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 0 60px rgba(255,20,20,0.2);
+        }
+        .confirm-card h3 {
+            color: #ff3333;
+            font-size: 18px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .confirm-card p {
+            color: #aaa;
+            font-size: 13px;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        .confirm-card .layer-list {
+            text-align: left;
+            margin: 12px 0;
+            padding: 12px 16px;
+            background: rgba(255,20,20,0.05);
+            border: 1px solid #2a1a1a;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #ccc;
+            line-height: 1.8;
+        }
+        .confirm-card .layer-list strong { color: #ff4444; }
+        .confirm-btns {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+            justify-content: center;
+        }
+        .confirm-btns button {
+            padding: 8px 24px;
+            font-size: 12px;
+        }
+        .btn-cancel {
+            background: #1a1a2e !important;
+            border: 1px solid #333 !important;
+            color: #888 !important;
+        }
+        .btn-cancel:hover {
+            border-color: #555 !important;
+            color: #ccc !important;
+            background: #252540 !important;
+            box-shadow: none !important;
+        }
+        /* Isolation progress overlay */
+        .isolation-progress {
+            margin-top: 16px;
+            text-align: left;
+        }
+        .isolation-progress .prog-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            font-size: 12px;
+            color: #666;
+        }
+        .prog-step.active { color: #ffaa00; }
+        .prog-step.done { color: #44ff44; }
+        .prog-step.error { color: #ff2020; }
+        .prog-step .prog-icon { width: 18px; text-align: center; }
+    </style>
+</head>
+<body>
+    <!-- Auth: Sign-in splash -->
+    <div class="sp-auth-splash" id="sp-auth-splash" style="display:none;">
+      <div class="sp-auth-card">
+        <div class="sp-auth-logo">&#x1F6E1;</div>
+        <div class="sp-auth-title">Security Portal Mock</div>
+        <div class="sp-auth-sub">Agent Threat Intelligence — Identity Research for Agent Management Using SPIFFE Simulation</div>
+        <button class="sp-auth-btn" id="sp-signin-btn" onclick="securityPortalSignIn()">
+          <svg viewBox="0 0 21 21"><path fill="#f25022" d="M0 0h10v10H0z"/><path fill="#7fba00" d="M11 0h10v10H11z"/><path fill="#00a4ef" d="M0 11h10v10H0z"/><path fill="#ffb900" d="M11 11h10v10H11z"/></svg>
+          Sign in with Microsoft
+        </button>
+        <div class="sp-auth-loading" id="sp-auth-loading">Signing in...</div>
+        <div class="sp-auth-error" id="sp-auth-error"></div>
+      </div>
+    </div>
+
+    <div class="header">
+        <div class="header-logo">&#x1F6E1;</div>
+        <div>
+            <h1>Security Portal Mock</h1>
+            <span class="subtitle">Agent Threat Intelligence &amp; Risk Signal Control</span>
+        </div>
+        <span class="badge" style="margin-left:auto">Simulation</span>
+        <div class="sp-user-banner" id="sp-user-banner" style="display:none;"></div>
+    </div>
+
+    <div class="threat-map">
+        <canvas id="threatCanvas"></canvas>
+    </div>
+
+    <div class="stats-bar">
+        <div><span class="stat-val" id="statTotal">0</span> Monitored Agents</div>
+        <div><span class="stat-val stat-ok" id="statSafe">0</span> Safe</div>
+        <div><span class="stat-val" id="statAtRisk">0</span> At Risk</div>
+        <div style="margin-left:auto;color:#333">Entra ID Protection + Sidecar Risk Store</div>
+    </div>
+
+    <div id="statusBar" class="status-bar" style="display:none;"></div>
+
+    <div class="page-wrap">
+    <div class="section-label">Agent Risk Posture</div>
+    <div id="agentsGrid" class="agents-grid">
+    </div>
+
+    </div><!-- page-wrap -->
+
+    <div class="footer">
+        <p>SECURITY PORTAL SIMULATION &mdash; External threat signal source for Identity Research for Agent Management Using SPIFFE agent risk enforcement.
+        The same <code>PUT /agent-risk</code> API is used by any EDR/XDR platform.
+        <a href="/docs" target="_blank">API Reference</a></p>
+    </div>
+
+    <script>
+        // ═══════════ THREAT MAP CANVAS ═══════════
+        (function() {
+            var canvas = document.getElementById('threatCanvas');
+            if (!canvas) return;
+            var ctx = canvas.getContext('2d');
+            var nodes = [];
+            var nodes = [];
+            var particles = [];
+            var rotation = 0;
+            var globeCX, globeCY, globeR;
+
+            function resize() {
+                canvas.width = canvas.parentElement.offsetWidth;
+                canvas.height = canvas.parentElement.offsetHeight;
+                globeCX = canvas.width / 2;
+                globeCY = canvas.height / 2;
+                globeR = Math.min(canvas.width, canvas.height) * 0.38;
+                initNodes();
+            }
+
+            // Place nodes on a sphere surface using lat/lon, project to 2D
+            function initNodes() {
+                nodes = [];
+                // City-ish positions: lat, lon pairs (rough approximations)
+                var cities = [
+                    [40.7, -74], [51.5, 0], [35.7, 139.7], [-33.9, 151.2],
+                    [55.8, 37.6], [22.3, 114.2], [48.9, 2.3], [37.8, -122.4],
+                    [-23.5, -46.6], [28.6, 77.2], [1.3, 103.8], [39.9, 116.4],
+                    [19.4, -99.1], [-1.3, 36.8], [35.2, -80.8], [25.2, 55.3],
+                    [59.9, 10.8], [-34.6, -58.4], [41.0, 29.0], [31.2, 121.5],
+                    [13.8, 100.5], [52.5, 13.4], [30.0, 31.2], [43.7, -79.4],
+                ];
+                for (var i = 0; i < cities.length; i++) {
+                    var lat = cities[i][0] * Math.PI / 180;
+                    var lon = cities[i][1] * Math.PI / 180;
+                    nodes.push({
+                        lat: lat,
+                        lon: lon,
+                        threat: Math.random() < 0.15,
+                        r: 3 + Math.random() * 1.5,
+                        label: ['NYC','LON','TKY','SYD','MOW','HKG','PAR','SFO','SAO','DEL','SIN','BEI','MEX','NAI','CLT','DXB','OSL','BUE','IST','SHA','BKK','BER','CAI','TOR'][i] || '',
+                    });
+                }
+            }
+
+            function projectNode(n) {
+                var lon = n.lon + rotation;
+                var x3d = Math.cos(n.lat) * Math.sin(lon);
+                var y3d = -Math.sin(n.lat);
+                var z3d = Math.cos(n.lat) * Math.cos(lon);
+                return {
+                    x: globeCX + x3d * globeR,
+                    y: globeCY + y3d * globeR,
+                    z: z3d,
+                    visible: z3d > -0.1,
+                };
+            }
+
+            function spawnParticle() {
+                if (nodes.length < 2) return;
+                var a = Math.floor(Math.random() * nodes.length);
+                var b = Math.floor(Math.random() * nodes.length);
+                if (a === b) return;
+                particles.push({ from: a, to: b, t: 0, speed: 0.004 + Math.random() * 0.008, threat: Math.random() < 0.25 });
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                rotation += 0.004;
+
+                // Stars background
+                ctx.fillStyle = 'rgba(255,255,255,0.15)';
+                for (var s = 0; s < 60; s++) {
+                    // Deterministic stars based on index
+                    var sx = ((s * 137.5) % canvas.width);
+                    var sy = ((s * 97.3 + 50) % canvas.height);
+                    ctx.fillRect(sx, sy, 1, 1);
+                }
+
+                // Globe outline glow
+                var grd = ctx.createRadialGradient(globeCX, globeCY, globeR * 0.95, globeCX, globeCY, globeR * 1.15);
+                grd.addColorStop(0, 'rgba(40,80,255,0.08)');
+                grd.addColorStop(1, 'rgba(40,80,255,0)');
+                ctx.fillStyle = grd;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Globe circle
+                ctx.beginPath();
+                ctx.arc(globeCX, globeCY, globeR, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(60,100,255,0.15)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Atmosphere glow
+                var atm = ctx.createRadialGradient(globeCX, globeCY, globeR * 0.8, globeCX, globeCY, globeR);
+                atm.addColorStop(0, 'rgba(20,60,180,0.03)');
+                atm.addColorStop(1, 'rgba(20,60,180,0.08)');
+                ctx.fillStyle = atm;
+                ctx.beginPath();
+                ctx.arc(globeCX, globeCY, globeR, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Latitude lines
+                for (var lat = -60; lat <= 60; lat += 30) {
+                    ctx.beginPath();
+                    var latR = lat * Math.PI / 180;
+                    var first = true;
+                    for (var deg = 0; deg <= 360; deg += 5) {
+                        var lon = deg * Math.PI / 180 + rotation;
+                        var x3 = Math.cos(latR) * Math.sin(lon);
+                        var z3 = Math.cos(latR) * Math.cos(lon);
+                        if (z3 < -0.05) { first = true; continue; }
+                        var y3 = -Math.sin(latR);
+                        var sx2 = globeCX + x3 * globeR;
+                        var sy2 = globeCY + y3 * globeR;
+                        if (first) { ctx.moveTo(sx2, sy2); first = false; }
+                        else ctx.lineTo(sx2, sy2);
+                    }
+                    ctx.strokeStyle = 'rgba(60,100,255,0.06)';
+                    ctx.lineWidth = 0.5;
+                    ctx.stroke();
+                }
+
+                // Project all nodes
+                var projected = [];
+                for (var i = 0; i < nodes.length; i++) {
+                    projected.push(projectNode(nodes[i]));
+                }
+
+                // Draw connections between nearby visible nodes (arc lines on surface)
+                for (var i2 = 0; i2 < nodes.length; i2++) {
+                    for (var j = i2 + 1; j < nodes.length; j++) {
+                        var p1 = projected[i2], p2 = projected[j];
+                        if (!p1.visible || !p2.visible) continue;
+                        var dx = p1.x - p2.x, dy = p1.y - p2.y;
+                        var dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < globeR * 1.2) {
+                            // Draw as a curved arc above the surface
+                            var mx = (p1.x + p2.x) / 2;
+                            var my = (p1.y + p2.y) / 2;
+                            var bulge = dist * 0.15;
+                            // Bulge away from globe center
+                            var angToCenter = Math.atan2(my - globeCY, mx - globeCX);
+                            var cpx = mx + Math.cos(angToCenter) * bulge;
+                            var cpy = my + Math.sin(angToCenter) * bulge;
+                            ctx.beginPath();
+                            ctx.moveTo(p1.x, p1.y);
+                            ctx.quadraticCurveTo(cpx, cpy, p2.x, p2.y);
+                            var alpha = 0.12 * Math.min(p1.z, p2.z);
+                            ctx.strokeStyle = 'rgba(100,180,255,' + Math.max(0.02, alpha) + ')';
+                            ctx.lineWidth = 0.5;
+                            ctx.stroke();
+                        }
+                    }
+                }
+
+                // Draw particles along arcs
+                for (var p = particles.length - 1; p >= 0; p--) {
+                    var part = particles[p];
+                    part.t += part.speed;
+                    if (part.t >= 1) { particles.splice(p, 1); continue; }
+                    var pa = projected[part.from], pb = projected[part.to];
+                    if (!pa.visible && !pb.visible) continue;
+                    var t = part.t;
+                    // Quadratic bezier along the arc
+                    var mx2 = (pa.x + pb.x) / 2, my2 = (pa.y + pb.y) / 2;
+                    var d2 = Math.sqrt((pa.x - pb.x) * (pa.x - pb.x) + (pa.y - pb.y) * (pa.y - pb.y));
+                    var ang2 = Math.atan2(my2 - globeCY, mx2 - globeCX);
+                    var cpx2 = mx2 + Math.cos(ang2) * d2 * 0.15;
+                    var cpy2 = my2 + Math.sin(ang2) * d2 * 0.15;
+                    var u = 1 - t;
+                    var px = u * u * pa.x + 2 * u * t * cpx2 + t * t * pb.x;
+                    var py = u * u * pa.y + 2 * u * t * cpy2 + t * t * pb.y;
+                    ctx.beginPath();
+                    ctx.arc(px, py, part.threat ? 3 : 1.5, 0, Math.PI * 2);
+                    ctx.fillStyle = part.threat ? 'rgba(255,40,40,0.9)' : 'rgba(68,200,255,0.6)';
+                    if (part.threat) { ctx.shadowColor = '#ff2020'; ctx.shadowBlur = 10; }
+                    else { ctx.shadowColor = '#44aaff'; ctx.shadowBlur = 4; }
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+
+                // Draw nodes on globe surface
+                for (var k = 0; k < nodes.length; k++) {
+                    var pr = projected[k];
+                    if (!pr.visible) continue;
+                    var fade = Math.max(0.3, pr.z);
+                    var nr = nodes[k].r * (0.6 + 0.4 * fade);
+                    ctx.beginPath();
+                    ctx.arc(pr.x, pr.y, nr, 0, Math.PI * 2);
+                    ctx.fillStyle = nodes[k].threat
+                        ? 'rgba(255,40,40,' + (0.95 * fade) + ')'
+                        : 'rgba(100,200,255,' + (0.8 * fade) + ')';
+                    if (nodes[k].threat) { ctx.shadowColor = '#ff2020'; ctx.shadowBlur = 15 * fade; }
+                    else { ctx.shadowColor = '#44ccff'; ctx.shadowBlur = 8 * fade; }
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+
+                    // Node label
+                    if (nodes[k].label && fade > 0.4) {
+                        ctx.font = '8px monospace';
+                        ctx.fillStyle = 'rgba(200,220,255,' + (0.6 * fade) + ')';
+                        ctx.fillText(nodes[k].label, pr.x + nr + 3, pr.y + 3);
+                    }
+
+                    // Ping ring on threat nodes
+                    if (nodes[k].threat && Math.random() < 0.03) {
+                        ctx.beginPath();
+                        ctx.arc(pr.x, pr.y, 10, 0, Math.PI * 2);
+                        ctx.strokeStyle = 'rgba(255,40,40,0.4)';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                }
+
+                if (Math.random() < 0.08) spawnParticle();
+                requestAnimationFrame(draw);
+            }
+
+            window.addEventListener('resize', resize);
+            resize();
+            draw();
+        })();
+
+        // ═══════════ STATS BAR UPDATER ═══════════
+        function updateStats() {
+            var total = KNOWN_AGENTS.length;
+            var atRisk = 0;
+            KNOWN_AGENTS.forEach(function(a) {
+                var info = getRiskForAgent(a);
+                if (info.risk === 'high' || info.risk === 'medium') atRisk++;
+            });
+            var el = document.getElementById('statTotal');
+            if (el) el.textContent = total;
+            el = document.getElementById('statSafe');
+            if (el) { el.textContent = total - atRisk; el.className = 'stat-val' + (atRisk === 0 ? ' stat-ok' : ''); }
+            el = document.getElementById('statAtRisk');
+            if (el) { el.textContent = atRisk; el.style.color = atRisk > 0 ? '#ff2020' : '#44ff44'; }
+        }
+        // Agents loaded dynamically from /api/agents (populated from portal-config.json)
+        var KNOWN_AGENTS = [];
+
+        let agentRisks = {};
+        // Track which agents are isolated
+        let isolatedAgents = {};  // key -> { layers: {...} }
+        // Track in-flight isolation operations
+        let isolationBusy = {};
+
+        function showStatus(msg, type) {
+            type = type || 'info';
+            const bar = document.getElementById('statusBar');
+            bar.style.display = 'block';
+            bar.textContent = '';
+            const span = document.createElement('span');
+            span.className = type;
+            span.textContent = msg;
+            bar.appendChild(span);
+            if (type === 'success') {
+                setTimeout(function() { bar.style.display = 'none'; }, 3000);
+            }
+        }
+
+        async function loadAgentMetadata() {
+            try {
+                const resp = await fetch('/api/agents');
+                const data = await resp.json();
+                KNOWN_AGENTS = (data.agents || []).map(function(a) {
+                    return { name: a.name, key: a.key, tag: a.tag || '', spiffe_id: a.spiffe_id || '', entra_agent_id: a.entra_agent_id || '', role: a.role || '' };
+                });
+            } catch (e) {
+                showStatus('Failed to load agent metadata: ' + e.message, 'error');
+                // Fallback for when config is unavailable
+                KNOWN_AGENTS = [
+                    { name: 'BudgetReport', key: 'budget-report', tag: 'finance', spiffe_id: '', entra_agent_id: '', role: '' },
+                    { name: 'BudgetBackend', key: 'budget-backend', tag: 'finance', spiffe_id: '', entra_agent_id: '', role: '' },
+                    { name: 'EmployeeMenus', key: 'employee-menus', tag: '', spiffe_id: '', entra_agent_id: '', role: '' },
+                    { name: 'BudgetApproval', key: 'budget-approval', tag: 'finance', spiffe_id: '', entra_agent_id: '', role: '' },
+                ];
+            }
+        }
+
+        async function loadAgents() {
+            try {
+                const resp = await fetch('/agents');
+                const data = await resp.json();
+                agentRisks = data.risks || {};
+                renderAgents();
+            } catch (e) {
+                showStatus('Failed to load agents: ' + e.message, 'error');
+            }
+        }
+
+        function getRiskForAgent(agent) {
+            // Use the SPIFFE ID from config metadata first
+            if (agent.spiffe_id && agentRisks[agent.spiffe_id] !== undefined) {
+                return { risk: agentRisks[agent.spiffe_id], spiffeId: agent.spiffe_id };
+            }
+            // Fallback: search risk store keys by agent key
+            for (const spiffeId of Object.keys(agentRisks)) {
+                if (spiffeId.indexOf(agent.key) !== -1) {
+                    return { risk: agentRisks[spiffeId], spiffeId: spiffeId };
+                }
+            }
+            // No risk data yet — use config SPIFFE ID if available
+            return { risk: 'low', spiffeId: agent.spiffe_id || null };
+        }
+
+        function renderAgents() {
+            const grid = document.getElementById('agentsGrid');
+            // Clear existing content safely
+            while (grid.firstChild) {
+                grid.removeChild(grid.firstChild);
+            }
+
+            KNOWN_AGENTS.forEach(function(agent) {
+                const info = getRiskForAgent(agent);
+                const riskClass = info.risk || 'low';
+                const isIsolated = !!isolatedAgents[agent.key];
+                const isBusy = !!isolationBusy[agent.key];
+
+                const card = document.createElement('div');
+                card.className = 'agent-card risk-' + riskClass + (isIsolated ? ' isolated' : '');
+                card.id = 'card-' + agent.key;
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'agent-name';
+                var threatIcon = document.createElement('span');
+                threatIcon.className = 'threat-icon';
+                if (isIsolated) {
+                    threatIcon.textContent = '\uD83D\uDD12';
+                } else {
+                    threatIcon.textContent = riskClass === 'high' ? '\u26A0' : riskClass === 'medium' ? '\u26A1' : '\u2714';
+                }
+                nameEl.appendChild(threatIcon);
+                nameEl.appendChild(document.createTextNode(agent.name));
+                card.appendChild(nameEl);
+
+                const spiffeEl = document.createElement('div');
+                spiffeEl.className = 'agent-spiffe';
+                spiffeEl.textContent = info.spiffeId || 'SPIFFE ID not yet registered';
+                card.appendChild(spiffeEl);
+
+                if (agent.entra_agent_id) {
+                    const oidEl = document.createElement('div');
+                    oidEl.className = 'agent-spiffe';
+                    oidEl.textContent = 'Entra OID: ' + agent.entra_agent_id;
+                    card.appendChild(oidEl);
+                }
+
+                const tagEl = document.createElement('span');
+                if (agent.tag) {
+                    tagEl.className = 'tag-badge-finance';
+                    tagEl.textContent = 'tag: ' + agent.tag;
+                } else {
+                    tagEl.className = 'tag-badge-none';
+                    tagEl.textContent = 'no tag';
+                }
+                card.appendChild(tagEl);
+
+                // \u2500\u2500 Isolation badge + layer status (when isolated) \u2500\u2500
+                if (isIsolated) {
+                    var badge = document.createElement('div');
+                    badge.className = 'isolated-badge';
+                    badge.textContent = '\uD83D\uDD12 ISOLATED \u2014 ALL ACCESS BLOCKED';
+                    card.appendChild(badge);
+
+                    var layers = isolatedAgents[agent.key].layers || {};
+                    var layersEl = document.createElement('div');
+                    layersEl.className = 'isolation-layers';
+
+                    var layerDefs = [
+                        { key: 'mtls', name: 'mTLS', detail: 'Removed from allow list' },
+                        { key: 'rbac', name: 'RBAC', detail: 'All rules set to DENY' },
+                        { key: 'oauth', name: 'OAuth', detail: 'Blocked (implicit via RBAC)' },
+                        { key: 'ca_risk', name: 'CA', detail: 'agent_state=disabled, risk=HIGH' },
+                    ];
+
+                    layerDefs.forEach(function(ld) {
+                        var li = document.createElement('div');
+                        li.className = 'layer-item';
+                        var check = document.createElement('span');
+                        check.className = 'layer-check';
+                        var layerData = layers[ld.key] || {};
+                        var isOk = layerData.status === 'success' || layerData.status === 'implicit';
+                        check.textContent = isOk ? '\u2714' : '\u2716';
+                        if (isOk) check.classList.add('ok');
+                        li.appendChild(check);
+                        var nameSpan = document.createElement('span');
+                        nameSpan.className = 'layer-name';
+                        nameSpan.textContent = ld.name;
+                        li.appendChild(nameSpan);
+                        var detailSpan = document.createElement('span');
+                        detailSpan.className = 'layer-detail';
+                        detailSpan.textContent = ld.detail;
+                        li.appendChild(detailSpan);
+                        layersEl.appendChild(li);
+                    });
+                    card.appendChild(layersEl);
+                }
+
+                // \u2500\u2500 Risk selector row (hidden when isolated) \u2500\u2500
+                if (!isIsolated) {
+                    const riskRow = document.createElement('div');
+                    riskRow.className = 'risk-row';
+
+                    const indicator = document.createElement('span');
+                    indicator.className = 'risk-indicator ' + riskClass;
+                    indicator.id = 'indicator-' + agent.key;
+                    riskRow.appendChild(indicator);
+
+                    const select = document.createElement('select');
+                    select.id = 'risk-' + agent.key;
+                    ['low', 'medium', 'high'].forEach(function(level) {
+                        const opt = document.createElement('option');
+                        opt.value = level;
+                        opt.textContent = level.charAt(0).toUpperCase() + level.slice(1);
+                        if (level === riskClass) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+                    select.addEventListener('change', function() {
+                        card.className = 'agent-card risk-' + select.value;
+                        indicator.className = 'risk-indicator ' + select.value;
+                    });
+                    riskRow.appendChild(select);
+
+                    const applyBtn = document.createElement('button');
+                    applyBtn.textContent = 'Apply';
+                    applyBtn.addEventListener('click', function() {
+                        setRisk(agent.key);
+                    });
+                    riskRow.appendChild(applyBtn);
+
+                    card.appendChild(riskRow);
+                }
+
+                // \u2500\u2500 Isolate / Restore button row \u2500\u2500
+                var isoRow = document.createElement('div');
+                isoRow.className = 'isolate-row';
+
+                if (isIsolated) {
+                    var restoreBtn = document.createElement('button');
+                    restoreBtn.className = 'btn-restore';
+                    restoreBtn.disabled = isBusy;
+                    restoreBtn.innerHTML = '\uD83D\uDD13 RESTORE ACCESS';
+                    restoreBtn.addEventListener('click', function() {
+                        showRestoreConfirm(agent);
+                    });
+                    isoRow.appendChild(restoreBtn);
+                } else {
+                    var isolateBtn = document.createElement('button');
+                    isolateBtn.className = 'btn-isolate';
+                    isolateBtn.disabled = isBusy;
+                    isolateBtn.innerHTML = '\uD83D\uDD12 ISOLATE AGENT';
+                    isolateBtn.addEventListener('click', function() {
+                        showIsolateConfirm(agent);
+                    });
+                    isoRow.appendChild(isolateBtn);
+                }
+
+                card.appendChild(isoRow);
+                grid.appendChild(card);
+            });
+            updateStats();
+        }
+
+        // \u2550\u2550\u2550\u2550\u2550\u2550 ISOLATION CONFIRMATION & EXECUTION \u2550\u2550\u2550\u2550\u2550\u2550
+
+        function showIsolateConfirm(agent) {
+            var overlay = document.createElement('div');
+            overlay.className = 'confirm-overlay';
+            overlay.id = 'confirm-overlay';
+
+            var card = document.createElement('div');
+            card.className = 'confirm-card';
+
+            card.innerHTML =
+                '<h3>\u26A0 Isolate ' + securityPortalEscapeHtml(agent.name) + '?</h3>' +
+                '<p>This will <strong style="color:#ff4444">immediately block ALL access</strong> for this agent across all 4 enforcement layers:</p>' +
+                '<div class="layer-list">' +
+                '<strong>Layer 1 \u2014 mTLS:</strong> Remove from SPIFFE allow list (connection refused)<br>' +
+                '<strong>Layer 2 \u2014 RBAC:</strong> Set all rules to DENY<br>' +
+                '<strong>Layer 3 \u2014 OAuth:</strong> Blocked implicitly (denied before JWT check)<br>' +
+                '<strong>Layer 4 \u2014 CA:</strong> Set agent_state=disabled + risk=HIGH' +
+                '</div>' +
+                '<p style="color:#ff6666;font-size:11px">The agent will be unable to communicate with any other agent or endpoint until restored.</p>' +
+                '<div class="confirm-btns">' +
+                '<button class="btn-cancel" id="confirm-cancel">Cancel</button>' +
+                '<button class="btn-isolate" id="confirm-isolate" style="flex:0">\uD83D\uDD12 ISOLATE NOW</button>' +
+                '</div>' +
+                '<div class="isolation-progress" id="isolation-progress" style="display:none"></div>';
+
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+
+            document.getElementById('confirm-cancel').addEventListener('click', function() {
+                document.body.removeChild(overlay);
+            });
+            document.getElementById('confirm-isolate').addEventListener('click', function() {
+                executeIsolation(agent, overlay);
+            });
+        }
+
+        function showRestoreConfirm(agent) {
+            var overlay = document.createElement('div');
+            overlay.className = 'confirm-overlay';
+
+            var card = document.createElement('div');
+            card.className = 'confirm-card';
+            card.style.borderColor = '#44ff44';
+
+            card.innerHTML =
+                '<h3 style="color:#44ff44">\uD83D\uDD13 Restore ' + securityPortalEscapeHtml(agent.name) + '?</h3>' +
+                '<p>This will <strong style="color:#44ff44">restore access</strong> across all 4 enforcement layers to the pre-isolation state.</p>' +
+                '<div class="confirm-btns">' +
+                '<button class="btn-cancel" id="confirm-cancel">Cancel</button>' +
+                '<button class="btn-restore" id="confirm-restore" style="flex:0">\uD83D\uDD13 RESTORE NOW</button>' +
+                '</div>';
+
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+
+            document.getElementById('confirm-cancel').addEventListener('click', function() {
+                document.body.removeChild(overlay);
+            });
+            document.getElementById('confirm-restore').addEventListener('click', function() {
+                executeRestore(agent, overlay);
+            });
+        }
+
+        async function executeIsolation(agent, overlay) {
+            var confirmBtn = document.getElementById('confirm-isolate');
+            var cancelBtn = document.getElementById('confirm-cancel');
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '\u23F3 Isolating...';
+            cancelBtn.style.display = 'none';
+
+            // Show progress steps
+            var progEl = document.getElementById('isolation-progress');
+            progEl.style.display = 'block';
+            progEl.innerHTML =
+                '<div class="prog-step active" id="prog-risk"><span class="prog-icon">\u23F3</span> Setting risk to HIGH (CA Layer 4b)...</div>' +
+                '<div class="prog-step" id="prog-rbac"><span class="prog-icon">\u2502</span> Disabling RBAC policy (Layers 4b + 2)...</div>' +
+                '<div class="prog-step" id="prog-mtls"><span class="prog-icon">\u2502</span> Removing from mTLS allow list (Layer 1)...</div>' +
+                '<div class="prog-step" id="prog-oauth"><span class="prog-icon">\u2502</span> OAuth blocked (implicit via RBAC)...</div>';
+
+            isolationBusy[agent.key] = true;
+
+            try {
+                var resp = await fetch('/isolate-agent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agent_key: agent.key }),
+                });
+                var result = await resp.json();
+
+                if (!resp.ok) {
+                    showStatus('Isolation failed: ' + (result.error || JSON.stringify(result)), 'error');
+                    document.body.removeChild(overlay);
+                    isolationBusy[agent.key] = false;
+                    return;
+                }
+
+                var layers = result.layers || {};
+
+                // Update progress indicators
+                _updateProgStep('prog-risk', layers.ca_risk);
+                _updateProgStep('prog-rbac', layers.rbac);
+                _updateProgStep('prog-mtls', layers.mtls);
+                _updateProgStep('prog-oauth', layers.oauth);
+
+                // Track isolation state
+                isolatedAgents[agent.key] = { layers: layers };
+
+                // Update risk state
+                if (agent.spiffe_id) {
+                    agentRisks[agent.spiffe_id] = 'high';
+                }
+
+                showStatus(agent.name + ' ISOLATED \u2014 all 4 enforcement layers locked down', 'success');
+
+                // Brief delay to show completed progress, then close
+                setTimeout(function() {
+                    if (document.body.contains(overlay)) {
+                        document.body.removeChild(overlay);
+                    }
+                    renderAgents();
+                }, 1500);
+            } catch (e) {
+                showStatus('Isolation failed: ' + e.message, 'error');
+                if (document.body.contains(overlay)) {
+                    document.body.removeChild(overlay);
+                }
+            }
+
+            isolationBusy[agent.key] = false;
+        }
+
+        async function executeRestore(agent, overlay) {
+            var confirmBtn = document.getElementById('confirm-restore');
+            var cancelBtn = document.getElementById('confirm-cancel');
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '\u23F3 Restoring...';
+            cancelBtn.style.display = 'none';
+
+            isolationBusy[agent.key] = true;
+
+            try {
+                var resp = await fetch('/restore-agent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agent_key: agent.key }),
+                });
+                var result = await resp.json();
+
+                if (!resp.ok) {
+                    showStatus('Restore failed: ' + (result.error || JSON.stringify(result)), 'error');
+                    document.body.removeChild(overlay);
+                    isolationBusy[agent.key] = false;
+                    return;
+                }
+
+                // Clear isolation state
+                delete isolatedAgents[agent.key];
+
+                // Update risk state
+                if (agent.spiffe_id) {
+                    agentRisks[agent.spiffe_id] = 'low';
+                }
+
+                showStatus(agent.name + ' RESTORED \u2014 all 4 enforcement layers re-enabled', 'success');
+                document.body.removeChild(overlay);
+                renderAgents();
+            } catch (e) {
+                showStatus('Restore failed: ' + e.message, 'error');
+                if (document.body.contains(overlay)) {
+                    document.body.removeChild(overlay);
+                }
+            }
+
+            isolationBusy[agent.key] = false;
+        }
+
+        function _updateProgStep(stepId, layerResult) {
+            var el = document.getElementById(stepId);
+            if (!el) return;
+            var isOk = layerResult && (layerResult.status === 'success' || layerResult.status === 'implicit');
+            el.className = 'prog-step ' + (isOk ? 'done' : 'error');
+            el.querySelector('.prog-icon').textContent = isOk ? '\u2714' : '\u2716';
+        }
+
+        // Load isolation state from server on startup
+        async function loadIsolationStatus() {
+            try {
+                var resp = await fetch('/api/isolation-status');
+                var data = await resp.json();
+                var agents = data.isolated_agents || [];
+                agents.forEach(function(key) {
+                    if (!isolatedAgents[key]) {
+                        isolatedAgents[key] = { layers: {
+                            ca_risk: { status: 'success' },
+                            ca_policy: { status: 'success' },
+                            rbac: { status: 'success' },
+                            mtls: { status: 'success' },
+                            oauth: { status: 'implicit' },
+                        }};
+                    }
+                });
+            } catch(e) {
+                // Non-critical — isolation status will be detected from UI state
+            }
+        }
+
+        async function setRisk(agentKey) {
+            const select = document.getElementById('risk-' + agentKey);
+            const riskLevel = select.value;
+
+            // Find the SPIFFE ID: prefer config metadata, then risk store keys
+            var spiffeId = null;
+            var agent = KNOWN_AGENTS.find(function(a) { return a.key === agentKey; });
+            if (agent && agent.spiffe_id) {
+                spiffeId = agent.spiffe_id;
+            } else {
+                for (const sid of Object.keys(agentRisks)) {
+                    if (sid.indexOf(agentKey) !== -1) {
+                        spiffeId = sid;
+                        break;
+                    }
+                }
+            }
+
+            if (!spiffeId) {
+                showStatus('No SPIFFE ID found for ' + agentKey + '. Load portal-config.json first.', 'error');
+                return;
+            }
+
+            try {
+                const resp = await fetch(
+                    '/set-risk?spiffe_id=' + encodeURIComponent(spiffeId) + '&risk_level=' + riskLevel,
+                    { method: 'PUT' }
+                );
+                const result = await resp.json();
+                var sidecarOk = result.sidecar && !result.sidecar.error;
+                var entraSkipped = result.entra && result.entra.entra_status === 'skipped';
+                var entraFailed = result.entra && result.entra.entra_status === 'error';
+                if (resp.ok && sidecarOk) {
+                    var msg = agentKey + ': risk set to ' + riskLevel;
+                    if (entraSkipped) {
+                        msg += ' (sidecar only — Entra skipped: ' + (result.entra.reason || 'unknown') + ')';
+                        showStatus(msg, 'info');
+                    } else if (entraFailed) {
+                        msg += ' (sidecar OK, but Entra update failed: ' + (result.entra.detail || 'unknown') + ')';
+                        showStatus(msg, 'error');
+                    } else {
+                        showStatus(msg, 'success');
+                    }
+                    agentRisks[spiffeId] = riskLevel;
+                    renderAgents();
+                } else {
+                    var detail = (result.sidecar && result.sidecar.error) || JSON.stringify(result);
+                    showStatus('Update failed: ' + detail, 'error');
+                }
+            } catch (e) {
+                showStatus('Failed to set risk: ' + e.message, 'error');
+            }
+        }
+
+        // Initial load: fetch agent metadata from config, then risk levels
+        var _securityPortalMsal = null;
+        var _securityPortalAuthCfg = null;
+        var _securityPortalToken = null;
+        var _securityPortalUser = null;
+
+        function securityPortalEscapeHtml(s) {
+            var d = document.createElement('div'); d.appendChild(document.createTextNode(s || '')); return d.innerHTML;
+        }
+
+        async function securityPortalInitAuth() {
+            try {
+                var r = await fetch('/api/auth-config');
+                _securityPortalAuthCfg = await r.json();
+            } catch(e) {
+                _securityPortalAuthCfg = { auth_required: false };
+            }
+            if (!_securityPortalAuthCfg.auth_required) {
+                _securityPortalUser = { name: 'Local Dev', email: '', role: 'admin' };
+                return;
+            }
+            _securityPortalMsal = new msal.PublicClientApplication({
+                auth: { clientId: _securityPortalAuthCfg.client_id, authority: _securityPortalAuthCfg.authority, redirectUri: window.location.origin + '/' },
+                cache: { cacheLocation: 'sessionStorage' }
+            });
+            var resp = await _securityPortalMsal.handleRedirectPromise();
+            if (resp) _securityPortalToken = resp.accessToken;
+            var accounts = _securityPortalMsal.getAllAccounts();
+            if (accounts.length > 0) {
+                await securityPortalAcquireToken(accounts[0]);
+            } else {
+                document.getElementById('sp-auth-splash').style.display = 'flex';
+                throw 'not_authenticated';
+            }
+        }
+
+        async function securityPortalAcquireToken(account) {
+            try {
+                var resp = await _securityPortalMsal.acquireTokenSilent({ scopes: ['openid', 'profile'], account: account });
+                _securityPortalToken = resp.idToken || resp.accessToken || '';
+                var claims = account.idTokenClaims || resp.idTokenClaims || {};
+                var groups = claims.groups || [];
+                var roles = claims.roles || [];
+                var role = 'none';
+                if (_securityPortalAuthCfg.admin_group_id && (groups.indexOf(_securityPortalAuthCfg.admin_group_id) !== -1 || roles.indexOf(_securityPortalAuthCfg.admin_group_id) !== -1)) role = 'admin';
+                else if (_securityPortalAuthCfg.viewer_group_id && (groups.indexOf(_securityPortalAuthCfg.viewer_group_id) !== -1 || roles.indexOf(_securityPortalAuthCfg.viewer_group_id) !== -1)) role = 'viewer';
+                if (role === 'none') {
+                    document.getElementById('sp-auth-splash').style.display = 'flex';
+                    var e = document.getElementById('sp-auth-error');
+                    e.textContent = 'Access Denied. Groups: ' + JSON.stringify(groups) + ' | Expected admin: ' + (_securityPortalAuthCfg.admin_group_id || 'not set');
+                    e.style.display = 'block';
+                    console.log('Security portal auth debug — claims:', claims);
+                    throw 'no_role';
+                }
+                _securityPortalUser = { name: resp.account.name || '', email: resp.account.username || '', role: role };
+                document.getElementById('sp-auth-splash').style.display = 'none';
+                securityPortalRenderBanner();
+            } catch(err) {
+                if (err && err.name === 'InteractionRequiredAuthError') {
+                    return _securityPortalMsal.acquireTokenRedirect({ scopes: ['User.Read'] });
+                }
+                throw err;
+            }
+        }
+
+        function securityPortalSignIn() {
+            if (!_securityPortalMsal) return;
+            document.getElementById('sp-auth-loading').style.display = 'block';
+            document.getElementById('sp-signin-btn').style.display = 'none';
+            _securityPortalMsal.loginRedirect({ scopes: ['openid', 'profile'] });
+        }
+
+        function securityPortalSignOut() {
+            if (_securityPortalMsal) _securityPortalMsal.logoutRedirect();
+        }
+
+        function securityPortalRenderBanner() {
+            var b = document.getElementById('sp-user-banner');
+            if (!_securityPortalUser || !_securityPortalAuthCfg || !_securityPortalAuthCfg.auth_required) { b.style.display = 'none'; return; }
+            var initials = (_securityPortalUser.name || '?').split(' ').map(function(w){return w[0]||'';}).join('').substring(0,2).toUpperCase();
+            b.innerHTML =
+                '<div class="sp-user-avatar">' + securityPortalEscapeHtml(initials) + '</div>' +
+                '<div><div class="sp-user-name">' + securityPortalEscapeHtml(_securityPortalUser.name) + '</div>' +
+                '<div class="sp-user-role">' + securityPortalEscapeHtml(_securityPortalUser.role) + '</div></div>' +
+                '<button class="sp-signout" onclick="securityPortalSignOut()">Sign out</button>';
+            b.style.display = 'flex';
+        }
+
+        // Wrap fetch calls to add Bearer token + auto-refresh on 401
+        var _origFetch = window.fetch;
+        window.fetch = function(url, opts) {
+            opts = opts || {};
+            if (_securityPortalToken && typeof url === 'string' && (url.startsWith('/api/') || url.startsWith('/set-risk') || url.startsWith('/agents') || url.startsWith('/isolate-agent') || url.startsWith('/restore-agent'))) {
+                opts.headers = Object.assign({}, opts.headers || {});
+                opts.headers['Authorization'] = 'Bearer ' + _securityPortalToken;
+            }
+            return _origFetch.call(window, url, opts).then(function(resp) {
+                if (resp.status === 401 && !opts._retried && _securityPortalMsal) {
+                    var accounts = _securityPortalMsal.getAllAccounts();
+                    if (accounts.length > 0) {
+                        return securityPortalAcquireToken(accounts[0]).then(function() {
+                            opts._retried = true;
+                            opts.headers = Object.assign({}, opts.headers || {});
+                            opts.headers['Authorization'] = 'Bearer ' + _securityPortalToken;
+                            return _origFetch.call(window, url, opts);
+                        }).catch(function() {
+                            console.warn('Token refresh failed, redirecting to login');
+                            return _securityPortalMsal.acquireTokenRedirect({ scopes: ['openid', 'profile'] });
+                        });
+                    }
+                }
+                return resp;
+            });
+        };
+
+        (async function() {
+            try {
+                await securityPortalInitAuth();
+            } catch(e) {
+                if (e === 'not_authenticated' || e === 'no_role') return;
+                console.error('Auth init failed', e);
+                // Fall through to load agents anyway in local mode
+            }
+            await loadAgentMetadata();
+            await loadIsolationStatus();
+            await loadAgents();
+        })();
+        // Refresh risk levels every 10 seconds
+        setInterval(loadAgents, 10000);
+    </script>
+</body>
+</html>

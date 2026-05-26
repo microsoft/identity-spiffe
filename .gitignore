@@ -1,0 +1,62 @@
+# Editor / OS
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+
+# Agent/session-local state
+.claude/
+.codex/
+.copilot/
+.gstack/
+.worktrees/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Go
+*.test
+*.prof
+coverage.out
+
+# Node / docs tooling
+node_modules/
+site/
+.cache/
+
+# Secrets, certificates, and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.csr
+portal/portal-config.json
+portal/policy-configs.json
+
+# Azure and cloud-local state
+.azure/
+.azure-bundle-exchange.json
+.gcp-bundle-exchange.json
+azure.yaml.user
+
+# Logs and local process output
+*.log
+nohup.out
+
+# Internal Microsoft compliance/package-manager files are intentionally not
+# part of the public tree.
+.config/
+owners.txt
+pip.conf
+pip.ini
