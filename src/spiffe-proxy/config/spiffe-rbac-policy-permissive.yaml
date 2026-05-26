@@ -1,0 +1,74 @@
+# =============================================================================
+# AIM Prototype Platform - SPIFFE RBAC Gateway Policy — PERMISSIVE BASELINE
+# =============================================================================
+# RBAC is wide open (default_action: allow) — no path/method restrictions.
+# But JWT enforcement (Layer 3) is still active on budget operations.
+#
+# This demonstrates that OAuth/JWT is an INDEPENDENT enforcement layer:
+# even when mTLS allows everyone and RBAC allows everything, the proxy
+# still blocks callers that lack the required app roles in their JWT.
+#
+# v4.0: Uses Entra Agent Identity Blueprint SPIFFE format.
+#
+# Demo flow:
+#   1. Deploy with this policy → RBAC allows everything
+#   2. BudgetReport → GET /budget/read → 200 (has Budget.Read role)
+#   3. BudgetReport → POST /budget/submit → 403 (lacks Budget.Submit role)
+#   4. BudgetApproval → POST /budget/submit → 200 (has Budget.Submit role)
+#   5. This proves JWT enforcement works independently of RBAC
+# =============================================================================
+
+version: "4.0-permissive"
+trust_domain: "aim.microsoft.com"
+default_action: allow
+
+policies:
+  # ─── BudgetReport: RBAC allows all, JWT restricts to Budget.Read ───
+  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"
+    name: "budget-report"
+    entra_agent_id: ""
+    description: "RBAC permissive, JWT requires Budget.Read"
+    rules:
+      - path: "/budget/read"
+        methods: ["GET", "POST"]
+        action: allow
+        require_jwt: true
+        required_roles: ["Budget.Read"]
+      - path: "/budget/submit"
+        methods: ["POST"]
+        action: allow
+        require_jwt: true
+        required_roles: ["Budget.Submit"]
+
+  # ─── BudgetApproval: RBAC allows budget ops, JWT enforced ───
+  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"
+    name: "budget-approval"
+    entra_agent_id: ""
+    description: "Full budget access"
+    rules:
+      - path: "/budget/read"
+        methods: ["GET", "POST"]
+        action: allow
+        require_jwt: true
+        required_roles: ["Budget.Read"]
+      - path: "/budget/submit"
+        methods: ["POST"]
+        action: allow
+        require_jwt: true
+        required_roles: ["Budget.Submit"]
+  # ─── Admin Control Plane: management only ───
+  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"
+    name: "admin-control-plane"
+    entra_agent_id: ""
+    description: "Dedicated management service"
+    ca:
+      agent_state: enabled
+      agent_tag: admin
+      skip_target_tag_check: true
+    rules:
+      - path: "/mgmt/*"
+        methods: ["GET", "PUT"]
+        action: allow
+      - path: "/*"
+        methods: ["*"]
+        action: allow

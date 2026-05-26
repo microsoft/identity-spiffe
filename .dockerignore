@@ -1,0 +1,36 @@
+# Docker builds for portal/Dockerfile and crowdstrike-mock/Dockerfile use the
+# repo root as context, but they only need portal/, crowdstrike-mock/, and
+# src/shared/. Keep the context tight so ACR builds are faster and cleaner.
+
+# VCS / local tooling
+.git
+.azure
+.claude
+.github
+.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+__pycache__/
+.DS_Store
+
+# Docs, infra, and deployment assets are not needed in these images
+docs/
+infra/
+scripts/
+*.md
+*.bicep
+*.bicepparam
+azure.yaml
+deploy.sh
+LICENSE
+
+# Portal runtime does not need tests
+portal/tests/
+portal/test_*.py
+
+# Keep only shared runtime modules from src/
+src/*
+!src/shared/
+!src/shared/**
+src/shared/test_*.py

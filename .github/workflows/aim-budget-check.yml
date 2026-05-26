@@ -1,0 +1,88 @@
+# AIM Budget Check — GitHub Actions Federation Demo
+#
+# Demonstrates a GitHub Actions workflow calling the AIM budget-backend
+# through all 5 security layers:
+#   Layer 1: SPIFFE mTLS (via spiffe-proxy on self-hosted runner)
+#   Layer 2: RBAC (federated_policies entry for github-budget-reader)
+#   Layer 3: Entra JWT (Agent Identity token with Budget.Read role)
+#   Layer 4a: Conditional Access (risk evaluation)
+#   Layer 4b: Tag-based auth (github_repo custom claim)
+#
+# Prerequisites:
+#   - Self-hosted runner provisioned with: deploy.sh --github
+#   - Runner labels: self-hosted, aim-runner
+#
+# Trigger: Manual dispatch only (for demo purposes)
+
+name: AIM Budget Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: 'Budget backend endpoint path'
+        required: false
+        default: '/budget/read'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-budget:
+    name: Check Budget via AIM
+    runs-on: [self-hosted, aim-runner]
+
+    steps:
+      - name: Checkout (for action reference)
+        uses: actions/checkout@v4
+
+      - name: Authenticate to AIM
+        uses: ./.github/actions/aim-auth
+        with:
+          aim-endpoint: ${{ vars.AIM_ENDPOINT || 'http://localhost:8080' }}
+
+      - name: Call budget-backend via spiffe-proxy
+        run: |
+          echo "🔍 Calling budget-backend through AIM 5-layer enforcement..."
+          echo "   Endpoint: http://localhost:8080${{ github.event.inputs.endpoint }}"
+          echo ""
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "Authorization: Bearer $AIM_TOKEN" \
+            "http://localhost:8080${{ github.event.inputs.endpoint }}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "   HTTP Status: $HTTP_CODE"
+          echo "   Response: $BODY"
+          echo ""
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ Budget check succeeded — all 5 layers passed"
+          elif [ "$HTTP_CODE" = "401" ]; then
+            echo "❌ Layer 3 (OAuth) rejected — invalid or missing JWT"
+            exit 1
+          elif [ "$HTTP_CODE" = "403" ]; then
+            echo "❌ Layer 2 (RBAC) or Layer 4 (CA/Tag) rejected"
+            echo "   Check RBAC policy and Conditional Access configuration"
+            exit 1
+          else
+            echo "❌ Unexpected status: $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Display provenance
+        if: always()
+        run: |
+          echo ""
+          echo "📋 GitHub Actions Provenance:"
+          echo "   Repository:   ${{ github.repository }}"
+          echo "   Workflow:     ${{ github.workflow }}"
+          echo "   Ref:          ${{ github.ref }}"
+          echo "   SHA:          ${{ github.sha }}"
+          echo "   Run ID:       ${{ github.run_id }}"
+          echo "   Actor:        ${{ github.actor }}"
+          echo "   Runner:       ${{ runner.name }}"
+          echo ""

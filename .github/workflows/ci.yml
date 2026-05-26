@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 6 * * *'  # Nightly at 6 AM UTC (11 PM PT)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-ci:
+    name: Go (vet, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/spiffe-proxy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: src/spiffe-proxy/go.sum
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc Go plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      # Mirrors the protobuf generation in src/spiffe-proxy/Dockerfile (Stage 1).
+      - name: Generate protobuf code
+        run: |
+          mkdir -p internal/tunnel/tunnelpb
+          protoc --go_out=. --go_opt=paths=source_relative \
+                 --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+                 --go_opt=Mproto/tunnel.proto=github.com/project-aim/spiffe-proxy/internal/tunnel/tunnelpb \
+                 --go-grpc_opt=Mproto/tunnel.proto=github.com/project-aim/spiffe-proxy/internal/tunnel/tunnelpb \
+                 -I. proto/tunnel.proto
+          mv proto/tunnel.pb.go internal/tunnel/tunnelpb/ 2>/dev/null || true
+          mv proto/tunnel_grpc.pb.go internal/tunnel/tunnelpb/ 2>/dev/null || true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -v -race -count=1 ./...
+
+      - name: Build
+        run: CGO_ENABLED=0 go build -o /dev/null ./cmd/main.go
+
+  portal-ci:
+    name: Portal (Python tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install fastapi httpx pyyaml uvicorn
+
+      - name: Run portal tests
+        run: python -m unittest discover -s portal -p 'test_*.py' -v
+
+  agents-ci:
+    name: Agents (import, health, auth tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install fastapi httpx uvicorn starlette "PyJWT[crypto]>=2.8.0"
+
+      - name: Run agent tests
+        run: python -m unittest src/test_agents.py -v
+
+  docker-build:
+    name: Docker build (spiffe-proxy)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build spiffe-proxy image
+        run: docker build --file src/spiffe-proxy/Dockerfile src/spiffe-proxy/ --tag spiffe-proxy:ci

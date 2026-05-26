@@ -1,0 +1,95 @@
+name: 'AIM Auth'
+description: 'Authenticate to AIM platform via GitHub OIDC → Entra Agent Identity'
+inputs:
+  aim-endpoint:
+    description: 'AIM budget-backend endpoint (e.g., http://localhost:8080)'
+    required: false
+    default: 'http://localhost:8080'
+  audience:
+    description: 'Token audience for FIC exchange'
+    required: false
+    default: 'api://AzureADTokenExchange'
+outputs:
+  aim-token:
+    description: 'Entra Agent Identity access token'
+    value: ${{ steps.exchange.outputs.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Fetch GitHub OIDC token
+      id: oidc
+      shell: bash
+      run: |
+        if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+          echo "::error::OIDC not available. Add 'permissions: id-token: write' to your workflow."
+          exit 1
+        fi
+
+        OIDC_TOKEN=$(curl -sS \
+          -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${{ inputs.audience }}" \
+          | python3 -c "import sys,json; print(json.load(sys.stdin).get('value',''))")
+
+        if [ -z "$OIDC_TOKEN" ]; then
+          echo "::error::Failed to fetch GitHub OIDC token"
+          exit 1
+        fi
+
+        echo "::add-mask::$OIDC_TOKEN"
+        echo "oidc_token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
+        echo "✅ GitHub OIDC token acquired"
+
+    - name: Exchange for Entra Agent Identity token
+      id: exchange
+      shell: bash
+      run: |
+        # Source environment from the runner's AIM config
+        if [ -f /etc/aim-github-runner.env ]; then
+          set -a
+          source /etc/aim-github-runner.env
+          set +a
+        fi
+
+        if [ -z "$ENTRA_OAUTH2_AUDIENCE" ] || [ -z "$ENTRA_AGENT_ID" ] || [ -z "$AZURE_TENANT_ID" ]; then
+          echo "::error::AIM env vars not configured. Ensure runner was provisioned with deploy.sh --github."
+          exit 1
+        fi
+
+        TOKEN_ENDPOINT="https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token"
+
+        # Hop 1: OIDC token → Blueprint exchange token (T1)
+        HOP1_RESP=$(curl -sS -X POST "$TOKEN_ENDPOINT" \
+          -d "client_id=${ENTRA_OAUTH2_AUDIENCE}" \
+          -d "scope=api://AzureADTokenExchange/.default" \
+          -d "fmi_path=${ENTRA_AGENT_ID}" \
+          -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+          -d "client_assertion=${{ steps.oidc.outputs.oidc_token }}" \
+          -d "grant_type=client_credentials")
+        T1=$(echo "$HOP1_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('access_token',''))" 2>/dev/null || echo "")
+
+        if [ -z "$T1" ]; then
+          echo "::error::Hop 1 failed — Blueprint token exchange returned empty."
+          echo "Hop 1 response (sanitized):"
+          echo "$HOP1_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); d.pop('access_token',None); d.pop('id_token',None); print(json.dumps(d,indent=2))" 2>/dev/null || echo "$HOP1_RESP"
+          exit 1
+        fi
+
+        # Hop 2: T1 → Agent Identity token (T2)
+        T2=$(curl -sS -X POST "$TOKEN_ENDPOINT" \
+          -d "client_id=${ENTRA_AGENT_ID}" \
+          -d "scope=api://${ENTRA_OAUTH2_AUDIENCE}/.default" \
+          -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+          -d "client_assertion=$T1" \
+          -d "grant_type=client_credentials" \
+          | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('access_token',''))")
+
+        if [ -z "$T2" ]; then
+          echo "::error::Hop 2 failed — Agent Identity token exchange returned empty."
+          exit 1
+        fi
+
+        echo "::add-mask::$T2"
+        echo "token=$T2" >> "$GITHUB_OUTPUT"
+        echo "AIM_TOKEN=$T2" >> "$GITHUB_ENV"
+        echo "✅ Entra Agent Identity token acquired"
