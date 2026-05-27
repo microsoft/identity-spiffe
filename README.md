@@ -205,6 +205,16 @@ controls, `Agent Management Viewers` gets read-only access.
       <sub>Read-only status across all four layers — mTLS allow list, RBAC rules, OAuth role bindings, and CA governance — pulled live from the sidecar.</sub>
     </td>
   </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <a href="docs/assets/portal/a2a-test-call.png">
+        <img src="docs/assets/portal/a2a-test-call.png" alt="A2A direct call — BudgetReport → EmployeeMenus over HTTPS, blocked at the target by Conditional Access tag mismatch (caller_tag=finance vs target_tag=HR), JWT validated and risk low" width="100%">
+      </a>
+      <br>
+      <strong>Agent-to-agent (A2A) governance</strong><br>
+      <sub>Direct HTTPS call <em>between</em> agents — bypassing the SPIFFE tunnel — so the <strong>target</strong> enforces JWT, Conditional Access tags, and risk at the application layer. Here BudgetReport (<code>finance</code>) tries to read EmployeeMenus (<code>HR</code>): JWT validates and risk is low, but the CA tag mismatch returns a clean <code>403 agent_tag_mismatch</code> with the exact enforcement layer that denied it.</sub>
+    </td>
+  </tr>
 </table>
 
 Behind those screens are dedicated **Network Access**, **Policy Editor**,
