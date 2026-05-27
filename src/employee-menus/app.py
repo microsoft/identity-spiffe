@@ -13,7 +13,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import time as _time
-from entra_token_exchange import get_entra_token_async, flush_cached_token, get_last_token_error, get_token_provenance
+from entra_token_exchange import get_entra_token_async, flush_cached_token, get_last_token_error, get_token_provenance, sanitize_token_error
 
 try:
     import jwt as pyjwt
@@ -198,7 +198,7 @@ async def call_backend_raw(request: Request, method: str = "GET", path: str = "/
             "response": {
                 "error": "ca_policy_blocked",
                 "enforcement_layer": "conditional_access",
-                "detail": last_err,
+                "detail": sanitize_token_error(last_err),
                 "message": "Conditional Access policy denied token issuance (AADSTS53003).",
             },
         }
@@ -212,7 +212,7 @@ async def call_backend_raw(request: Request, method: str = "GET", path: str = "/
             "response": {
                 "error": "token_acquisition_failed",
                 "enforcement_layer": "authentication",
-                "detail": last_err or "No Entra token available",
+                "detail": sanitize_token_error(last_err),
                 "message": "Could not acquire an Entra token for authentication.",
             },
         }
@@ -393,7 +393,7 @@ async def _call_target(target: str):
             "response": {
                 "error": "ca_policy_blocked" if is_ca_block else "token_acquisition_failed",
                 "enforcement_layer": "conditional_access" if is_ca_block else "authentication",
-                "detail": last_err or "No Entra token available",
+                "detail": sanitize_token_error(last_err),
                 "message": "Conditional Access policy denied token issuance for this agent (AADSTS53003). "
                            "The agent is flagged as high-risk and the CA policy blocks high-risk agents."
                            if is_ca_block else "Could not acquire an Entra token for A2A authentication.",

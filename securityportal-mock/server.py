@@ -142,14 +142,16 @@ async def auth_middleware(request, call_next):
         claims = _jwt_validator.validate_token(token)
     except ValueError as e:
         logger.error("JWT validation failed (JWKS): %s", e)
-        return JSONResponse(status_code=401, content={"detail": str(e)})
+        return JSONResponse(status_code=401, content={"detail": "invalid_token"})
     except Exception as e:
-        return JSONResponse(status_code=401, content={"detail": "Invalid token: %s" % e})
+        logger.exception("JWT validation failed (unexpected): %s", e)
+        return JSONResponse(status_code=401, content={"detail": "invalid_token"})
 
     try:
         role = _jwt_validator.check_role(claims)
     except PermissionError as e:
-        return JSONResponse(status_code=403, content={"detail": str(e)})
+        logger.warning("JWT role check denied: %s", e)
+        return JSONResponse(status_code=403, content={"detail": "forbidden"})
 
     # Viewers can read but not change risk levels or isolate agents
     if role == "viewer" and request.method.upper() in ("PUT", "POST"):
@@ -460,7 +462,7 @@ async def _push_risk_to_entra(agent_oid: str, risk_level: str) -> dict:
                 return {"entra_status": "error", "code": resp.status_code, "detail": resp.text[:200]}
     except Exception as e:
         logger.error(f"Failed to push risk to Entra: {e}")
-        return {"entra_status": "error", "detail": str(e)}
+        return {"entra_status": "error", "detail": "entra_push_failed"}
 
 
 @app.get("/api/agents")
@@ -495,7 +497,7 @@ async def list_agents():
             return {"error": "Risk store returned {0}".format(resp.status_code), "risks": {}}
     except Exception as e:
         logger.warning("Failed to query risk store: %s", e)
-        return {"error": str(e), "risks": {}, "count": 0}
+        return {"error": "risk_store_unreachable", "risks": {}, "count": 0}
 
 
 @app.put("/set-risk")
@@ -544,7 +546,7 @@ async def set_risk(spiffe_id: str, risk_level: str):
                         spiffe_id, risk_level, entra_status)
     except Exception as e:
         logger.error("Failed to push risk to sidecar: %s", e)
-        result["sidecar"] = {"error": str(e)}
+        result["sidecar"] = {"error": "sidecar_unreachable"}
 
     return result
 
@@ -621,7 +623,7 @@ async def isolate_agent(request: Request):
             )
             risk_result = resp.json() if resp.status_code == 200 else {"error": resp.text[:200]}
     except Exception as e:
-        risk_result = {"error": str(e)}
+        risk_result = {"error": "risk_update_failed"}
 
     result["layers"]["ca_risk"] = {
         "status": "success" if risk_result.get("status") == "updated" else "error",
@@ -703,7 +705,7 @@ async def isolate_agent(request: Request):
                     policy_result = {"status": "error", "detail": put_resp.text[:200]}
     except Exception as e:
         logger.error("Isolation policy update failed for %s: %s", agent_key, e)
-        policy_result = {"status": "error", "detail": str(e)}
+        policy_result = {"status": "error", "detail": "policy_update_failed"}
 
     result["layers"]["ca_policy"] = policy_result
     result["layers"]["rbac"] = {
@@ -749,7 +751,7 @@ async def isolate_agent(request: Request):
                                "note": "Agent was not in mTLS allow list"}
     except Exception as e:
         logger.error("Isolation mTLS update failed for %s: %s", agent_key, e)
-        mtls_result = {"status": "error", "detail": str(e)}
+        mtls_result = {"status": "error", "detail": "mtls_update_failed"}
 
     result["layers"]["mtls"] = mtls_result
 
@@ -879,7 +881,7 @@ async def restore_agent(request: Request):
                     policy_result = {"status": "error", "detail": put_resp.text[:200]}
     except Exception as e:
         logger.error("Restore policy failed for %s: %s", agent_key, e)
-        policy_result = {"status": "error", "detail": str(e)}
+        policy_result = {"status": "error", "detail": "policy_update_failed"}
 
     result["layers"]["ca_policy"] = policy_result
     result["layers"]["rbac"] = {"status": policy_result.get("status", "error")}
@@ -914,7 +916,7 @@ async def restore_agent(request: Request):
                                "note": "Agent was already in mTLS allow list"}
     except Exception as e:
         logger.error("Restore mTLS failed for %s: %s", agent_key, e)
-        mtls_result = {"status": "error", "detail": str(e)}
+        mtls_result = {"status": "error", "detail": "mtls_update_failed"}
 
     result["layers"]["mtls"] = mtls_result
 
@@ -933,7 +935,7 @@ async def restore_agent(request: Request):
             )
             risk_result = resp.json() if resp.status_code == 200 else {"error": resp.text[:200]}
     except Exception as e:
-        risk_result = {"error": str(e)}
+        risk_result = {"error": "risk_update_failed"}
 
     result["layers"]["ca_risk"] = {
         "status": "success" if risk_result.get("status") == "updated" else "error",
