@@ -37,6 +37,28 @@
 # =============================================================================
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Fail-loud ERR trap — without this, `set -e` exits silently on any error
+# and the user is left staring at a frozen-looking terminal. Print the line
+# number, exit code, and the actual command that failed before we die.
+# ---------------------------------------------------------------------------
+_deploy_err_trap() {
+    local exit_code=$?
+    local line_no=${1:-?}
+    local cmd=${2:-?}
+    echo "" >&2
+    echo "════════════════════════════════════════════════════════════════════" >&2
+    echo "❌ deploy.sh FAILED" >&2
+    echo "   Exit code : ${exit_code}" >&2
+    echo "   Line      : ${line_no}" >&2
+    echo "   Command   : ${cmd}" >&2
+    echo "════════════════════════════════════════════════════════════════════" >&2
+    echo "" >&2
+    echo "Re-run with: bash -x ./deploy.sh   for full trace." >&2
+    exit "$exit_code"
+}
+trap '_deploy_err_trap "$LINENO" "$BASH_COMMAND"' ERR
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
 
@@ -108,6 +130,70 @@ if [ "$PORTAL_ONLY" = true ]; then
         exit 1
     fi
 fi
+
+# ---------------------------------------------------------------------------
+# EARLY azd environment sanity check — fail loud BEFORE any other preflight
+# ---------------------------------------------------------------------------
+# Resource groups are named rg-${AZURE_ENV_NAME}. Three failure modes that
+# previously caused silent hangs or cryptic downstream errors:
+#   1. No azd env exists yet (fresh clone) → azd commands prompt interactively
+#   2. Legacy 'aim-*' env name → downstream RG lookup ('rg-identity-spiffe' /
+#      'rg-isp-*') never matches and we hang on the wrong RG.
+#   3. Any other non-conforming name → same RG-mismatch hang.
+# Show the user the exact fix instead of letting it die deep in azd.
+# Skip for --help so users on a fresh machine can read the usage.
+# ---------------------------------------------------------------------------
+if [ "$SHOW_HELP" != true ]; then
+if ! command -v azd &>/dev/null; then
+    echo "❌ azd CLI not found. Install: brew tap azure/azd && brew install azd" >&2
+    exit 1
+fi
+
+AZD_ENV_NAME_PREFLIGHT=$(azd env get-values 2>/dev/null | grep -E "^AZURE_ENV_NAME=" | cut -d'=' -f2- | tr -d '"' || true)
+
+if [ -z "$AZD_ENV_NAME_PREFLIGHT" ]; then
+    echo "❌ No azd environment is selected (or none exists yet)." >&2
+    echo "" >&2
+    echo "   This is required so deploy.sh knows which resource group to target." >&2
+    echo "" >&2
+    echo "   Fresh machine? Create one with the canonical name:" >&2
+    echo "     azd env new identity-spiffe" >&2
+    echo "     azd env select identity-spiffe" >&2
+    echo "     ./deploy.sh --new --with-admin=<your-upn>" >&2
+    echo "" >&2
+    echo "   Or pick an existing one:" >&2
+    echo "     azd env list" >&2
+    echo "     azd env select <name>" >&2
+    exit 1
+fi
+
+if [[ "$AZD_ENV_NAME_PREFLIGHT" =~ ^aim(-|$) ]]; then
+    echo "❌ azd environment '${AZD_ENV_NAME_PREFLIGHT}' uses the legacy 'aim-*' naming." >&2
+    echo "   This repo was renamed; resource groups must be 'rg-identity-spiffe' or 'rg-isp-*'." >&2
+    echo "   With an aim-* env, downstream RG lookups silently miss and the script appears to hang." >&2
+    echo "" >&2
+    echo "   Fix — create a new env with a conforming name:" >&2
+    echo "     azd env new identity-spiffe" >&2
+    echo "     azd env select identity-spiffe" >&2
+    echo "     ./deploy.sh --new --with-admin=<your-upn>" >&2
+    echo "" >&2
+    echo "   (Your old aim-* env can be removed later with: azd env list, then" >&2
+    echo "    rm -rf .azure/${AZD_ENV_NAME_PREFLIGHT})" >&2
+    exit 1
+fi
+
+if [[ ! "$AZD_ENV_NAME_PREFLIGHT" =~ ^(identity-spiffe|isp-) ]]; then
+    echo "❌ azd environment '${AZD_ENV_NAME_PREFLIGHT}' does not match the required" >&2
+    echo "   'identity-spiffe' or 'isp-*' naming convention." >&2
+    echo "   Resource group would be 'rg-${AZD_ENV_NAME_PREFLIGHT}' instead of" >&2
+    echo "   'rg-identity-spiffe' or 'rg-isp-*', so RG detection will silently miss." >&2
+    echo "" >&2
+    echo "   Fix:  azd env new identity-spiffe && azd env select identity-spiffe" >&2
+    exit 1
+fi
+
+echo "✅ azd env: ${AZD_ENV_NAME_PREFLIGHT} (target RG: rg-${AZD_ENV_NAME_PREFLIGHT})"
+fi  # end SHOW_HELP guard around early azd preflight
 
 # ---------------------------------------------------------------------------
 # Google Cloud preflight — validate BEFORE spending 20 min on Azure deploy
@@ -585,29 +671,10 @@ done
 
 REQUIRE_REAL_CA="${REQUIRE_REAL_CA:-true}"
 
-# ---------------------------------------------------------------------------
-# Enforce identity-spiffe / isp-* naming convention for azd environments
-# ---------------------------------------------------------------------------
-# Resource groups are named rg-${AZURE_ENV_NAME}. The detection logic at Step 0
-# searches for rg-identity-spiffe* and rg-isp-* — any env not matching one of
-# those becomes invisible to its own environment detection and violates the
-# agreed naming convention.
-AZD_ENV_NAME=$(azd env get-values 2>/dev/null | grep -E "^AZURE_ENV_NAME=" | cut -d'=' -f2- | tr -d '"' || true)
-if [ -n "$AZD_ENV_NAME" ] && [[ ! "$AZD_ENV_NAME" =~ ^(identity-spiffe|isp-) ]]; then
-    echo "❌ azd environment name '${AZD_ENV_NAME}' does not follow the identity-spiffe / isp-* naming convention."
-    echo "   Resource group would be 'rg-${AZD_ENV_NAME}' instead of 'rg-identity-spiffe' or 'rg-isp-*'."
-    echo ""
-    echo "   Fix: create a new azd environment with a conforming name:"
-    echo "     azd env new identity-spiffe        # default"
-    echo "     azd env select identity-spiffe"
-    echo "     ./deploy.sh"
-    echo ""
-    echo "   Or use a scoped name like 'isp-dev':"
-    echo "     azd env new isp-dev"
-    echo "     azd env select isp-dev"
-    echo "     ./deploy.sh"
-    exit 1
-fi
+# Naming convention enforcement now happens in the EARLY preflight at the top
+# of this file (right after arg parsing) so the user fails fast before any
+# heavy work. AZD_ENV_NAME is kept here for downstream consumers.
+AZD_ENV_NAME="$AZD_ENV_NAME_PREFLIGHT"
 
 # ---------------------------------------------------------------------------
 # Ensure AZURE_LOCATION is set (azd needs this for subscription-level deploys)
