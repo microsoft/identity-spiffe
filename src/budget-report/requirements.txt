@@ -3,4 +3,4 @@ uvicorn[standard]==0.30.0
 httpx==0.27.0
 azure-identity==1.17.0
 azure-ai-projects==2.0.0b1
-python-dotenv==1.0.0
+python-dotenv==1.2.2
