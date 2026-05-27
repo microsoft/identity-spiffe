@@ -680,5 +680,27 @@ class TestTokenProvenance(unittest.TestCase):
         self.assertIsNone(mod._last_token_error)
 
 
+class TestSanitizeTokenError(unittest.TestCase):
+    """sanitize_token_error must strip exception text but preserve AADSTS codes."""
+
+    def test_aadsts_code_preserved(self):
+        mod = _fresh_import()
+        raw = "Agent Identity token exchange failed (400): AADSTS53003: Access blocked by Conditional Access"
+        self.assertEqual(mod.sanitize_token_error(raw), "AADSTS53003")
+
+    def test_generic_fallback_for_unrecognized_errors(self):
+        mod = _fresh_import()
+        raw = "ManagedIdentityCredential error: connection refused at /home/user/x.py:42"
+        self.assertEqual(mod.sanitize_token_error(raw), "token_acquisition_failed")
+
+    def test_none_returns_generic(self):
+        mod = _fresh_import()
+        self.assertEqual(mod.sanitize_token_error(None), "token_acquisition_failed")
+
+    def test_empty_string_returns_generic(self):
+        mod = _fresh_import()
+        self.assertEqual(mod.sanitize_token_error(""), "token_acquisition_failed")
+
+
 if __name__ == "__main__":
     unittest.main()

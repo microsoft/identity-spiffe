@@ -227,6 +227,6 @@ async def admin_proxy(mgmt_path: str, request: Request):
     except httpx.RequestError as exc:
         logger.error("[%s] Admin proxy failed: %s", AGENT_NAME, exc)
         return JSONResponse(
-            {"error": "backend_mgmt_unreachable", "detail": str(exc)},
+            {"error": "backend_mgmt_unreachable"},
             status_code=502,
         )
