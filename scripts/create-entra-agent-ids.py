@@ -58,7 +58,7 @@ def odata_escape(value):
 #   ENTRA_AGENTID_CLIENT_ID     — App registration client ID
 #   ENTRA_AGENTID_CLIENT_SECRET — App registration client secret
 #   AZURE_TENANT_ID             — Entra tenant ID (usually already set)
-PROVISIONER_APP_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Agent ID Provisioner"
+PROVISIONER_APP_DISPLAY_NAME = "Agent Management Agent ID Provisioner"
 
 # Microsoft Graph API ID (constant across all tenants)
 MS_GRAPH_API_ID = "00000003-0000-0000-c000-000000000000"

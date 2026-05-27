@@ -22,11 +22,11 @@ SCOPE_MODE_LEGACY = "legacy"
 SCOPE_MODE_SCOPED = "scoped"
 VALID_SCOPE_MODES = {SCOPE_MODE_LEGACY, SCOPE_MODE_SCOPED}
 
-LEGACY_BLUEPRINT_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Budget Backend Agents"
-LEGACY_PORTAL_MANAGEMENT_APP_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Portal - Management"
-LEGACY_PORTAL_SECURITYPORTAL_APP_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Portal - Security Portal Mock"
-LEGACY_PORTAL_ADMIN_GROUP_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Administrators"
-LEGACY_PORTAL_VIEWER_GROUP_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Viewers"
+LEGACY_BLUEPRINT_DISPLAY_NAME = "Agent Management Budget Backend Agents"
+LEGACY_PORTAL_MANAGEMENT_APP_DISPLAY_NAME = "Agent Management Portal - Management"
+LEGACY_PORTAL_SECURITYPORTAL_APP_DISPLAY_NAME = "Agent Management Portal - Security Portal Mock"
+LEGACY_PORTAL_ADMIN_GROUP_DISPLAY_NAME = "Agent Management Administrators"
+LEGACY_PORTAL_VIEWER_GROUP_DISPLAY_NAME = "Agent Management Viewers"
 LEGACY_PORTAL_ADMIN_GROUP_MAIL_NICKNAME = "isp-administrators"
 LEGACY_PORTAL_VIEWER_GROUP_MAIL_NICKNAME = "isp-viewers"
 

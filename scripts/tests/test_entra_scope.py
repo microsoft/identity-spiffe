@@ -88,7 +88,7 @@ class EntraScopeTests(unittest.TestCase):
 
         self.assertEqual(
             blueprint_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Budget Backend Agents [isp-bc4d]",
+            "Agent Management Budget Backend Agents [isp-bc4d]",
         )
         self.assertEqual(
             agent_identity_display_name("budget-report", scope),
@@ -100,19 +100,19 @@ class EntraScopeTests(unittest.TestCase):
         )
         self.assertEqual(
             portal_management_app_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Portal - Management [isp-bc4d]",
+            "Agent Management Portal - Management [isp-bc4d]",
         )
         self.assertEqual(
             portal_securityportal_app_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Portal - Security Portal Mock [isp-bc4d]",
+            "Agent Management Portal - Security Portal Mock [isp-bc4d]",
         )
         self.assertEqual(
             portal_admin_group_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Administrators",
+            "Agent Management Administrators",
         )
         self.assertEqual(
             portal_viewer_group_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Viewers",
+            "Agent Management Viewers",
         )
         self.assertEqual(
             portal_admin_group_mail_nickname(scope),
@@ -134,7 +134,7 @@ class EntraScopeTests(unittest.TestCase):
 
         self.assertEqual(
             blueprint_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Budget Backend Agents",
+            "Agent Management Budget Backend Agents",
         )
         self.assertEqual(
             agent_identity_display_name("budget-report", scope),
@@ -143,11 +143,11 @@ class EntraScopeTests(unittest.TestCase):
         self.assertEqual(fic_name("budget-report", scope), "isp-fic-budget-report")
         self.assertEqual(
             portal_management_app_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Portal - Management",
+            "Agent Management Portal - Management",
         )
         self.assertEqual(
             portal_admin_group_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Administrators",
+            "Agent Management Administrators",
         )
 
 

@@ -152,7 +152,7 @@ class GraphClient:
             }
         return result
 
-    async def fetch_ca_policies(self, display_name_filter="Identity Research for Agent Management Using SPIFFE:"):
+    async def fetch_ca_policies(self, display_name_filter="Agent Management:"):
         # type: (str) -> List[Dict]
         """Fetch Conditional Access policies from Graph beta API."""
         token = await self.require_token()

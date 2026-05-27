@@ -1843,11 +1843,11 @@ ISP_ADMIN_GROUP_ID=$(ensure_portal_group "$ISP_ADMIN_GROUP_ID" "$PORTAL_ADMIN_GR
 ISP_VIEWER_GROUP_ID=$(azd_env_get_from_blob "$AZD_VALUES" "ISP_VIEWER_GROUP_ID")
 ISP_VIEWER_GROUP_ID=$(ensure_portal_group "$ISP_VIEWER_GROUP_ID" "$PORTAL_VIEWER_GROUP_NAME" "$PORTAL_VIEWER_GROUP_NICKNAME")
 
-# Add current user to Identity Research for Agent Management Using SPIFFE Administrators (best-effort)
+# Add current user to Agent Management Administrators (best-effort)
 CURRENT_USER_OID=$(az ad signed-in-user show --query "id" -o tsv 2>/dev/null || true)
 if [ -n "$CURRENT_USER_OID" ]; then
     az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$CURRENT_USER_OID" 2>/dev/null || true
-    echo "   Current user added to Identity Research for Agent Management Using SPIFFE Administrators"
+    echo "   Current user added to Agent Management Administrators"
 fi
 
 # Get portal FQDNs for redirect URIs (reload azd values — portal apps were just provisioned)
