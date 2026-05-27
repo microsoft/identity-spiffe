@@ -116,7 +116,7 @@ Customizable via `agent_path_template` using Go text/template.
 | `gcp_iit:project-id` | `gcp_iit:project-id:my-project-123` |
 | `gcp_iit:zone` | `gcp_iit:zone:us-central1-a` |
 | `gcp_iit:instance-name` | `gcp_iit:instance-name:gcp-budget-agent` |
-| `gcp_iit:tag` | `gcp_iit:tag:aim-agent` (requires `use_instance_metadata`) |
+| `gcp_iit:tag` | `gcp_iit:tag:isp-agent` (requires `use_instance_metadata`) |
 | `gcp_iit:sa` | `gcp_iit:sa:gcp-agent@proj.iam.gserviceaccount.com` (requires `use_instance_metadata`) |
 
 **Security model:** Trust On First Use (TOFU). A given GCE instance can only attest once. Subsequent attempts are rejected. This prevents non-agent code from impersonating the agent.

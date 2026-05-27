@@ -23,8 +23,8 @@
 #   GCP_ZONE         — default: ${GCP_REGION}-a
 #   GCP_MACHINE_TYPE — default: e2-medium
 #   GCP_VM_NAME      — default: google-budget-reader
-#   GCP_VPC_NAME     — default: aim-crosscloud
-#   GCP_SUBNET_NAME  — default: aim-agents
+#   GCP_VPC_NAME     — default: isp-crosscloud
+#   GCP_SUBNET_NAME  — default: isp-agents
 #   GCP_SUBNET_CIDR  — default: 10.128.0.0/20
 # =============================================================================
 set -euo pipefail
@@ -42,10 +42,10 @@ REGION="${GCP_REGION:-us-west1}"
 ZONE="${GCP_ZONE:-${REGION}-a}"
 MACHINE_TYPE="${GCP_MACHINE_TYPE:-e2-medium}"
 VM_NAME="${GCP_VM_NAME:-google-budget-reader}"
-VPC_NAME="${GCP_VPC_NAME:-aim-crosscloud}"
-SUBNET_NAME="${GCP_SUBNET_NAME:-aim-agents}"
+VPC_NAME="${GCP_VPC_NAME:-isp-crosscloud}"
+SUBNET_NAME="${GCP_SUBNET_NAME:-isp-agents}"
 SUBNET_CIDR="${GCP_SUBNET_CIDR:-10.128.0.0/20}"
-GCP_SA_NAME="${GCP_SA_NAME:-aim-agent}"
+GCP_SA_NAME="${GCP_SA_NAME:-isp-agent}"
 SA_EMAIL="${GCP_SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 
 # ─── Helper functions ────────────────────────────────────────────────────────
@@ -164,61 +164,61 @@ echo "📍 Step 4/5 — Firewall rules"
 
 # WARNING: SSH open to internet for PoC convenience. Restrict to operator IPs
 # (e.g., --source-ranges="YOUR_IP/32") in production.
-# aim-allow-ssh: TCP 22 from anywhere
-if gcloud compute firewall-rules describe "aim-allow-ssh" --project="$PROJECT" &>/dev/null; then
-    skip "Firewall rule aim-allow-ssh already exists, skipping"
+# isp-allow-ssh: TCP 22 from anywhere
+if gcloud compute firewall-rules describe "isp-allow-ssh" --project="$PROJECT" &>/dev/null; then
+    skip "Firewall rule isp-allow-ssh already exists, skipping"
 else
-    gcloud compute firewall-rules create "aim-allow-ssh" \
+    gcloud compute firewall-rules create "isp-allow-ssh" \
         --project="$PROJECT" \
         --network="$VPC_NAME" \
         --allow=tcp:22 \
         --source-ranges="0.0.0.0/0" \
         --description="Allow SSH access to Identity Research for Agent Management Using SPIFFE agents" \
         --quiet
-    info "Created firewall rule aim-allow-ssh"
+    info "Created firewall rule isp-allow-ssh"
 fi
 
-# aim-allow-https: TCP 443 from anywhere
-if gcloud compute firewall-rules describe "aim-allow-https" --project="$PROJECT" &>/dev/null; then
-    skip "Firewall rule aim-allow-https already exists, skipping"
+# isp-allow-https: TCP 443 from anywhere
+if gcloud compute firewall-rules describe "isp-allow-https" --project="$PROJECT" &>/dev/null; then
+    skip "Firewall rule isp-allow-https already exists, skipping"
 else
-    gcloud compute firewall-rules create "aim-allow-https" \
+    gcloud compute firewall-rules create "isp-allow-https" \
         --project="$PROJECT" \
         --network="$VPC_NAME" \
         --allow=tcp:443,tcp:8443 \
         --source-ranges="0.0.0.0/0" \
         --description="Allow HTTPS access to Identity Research for Agent Management Using SPIFFE agents (443 + 8443 for invoke_url)" \
         --quiet
-    info "Created firewall rule aim-allow-https"
+    info "Created firewall rule isp-allow-https"
 fi
 
-# aim-allow-spire: TCP 8081 from Azure VPN CIDR only (internal control-plane traffic)
-if gcloud compute firewall-rules describe "aim-allow-spire" --project="$PROJECT" &>/dev/null; then
-    skip "Firewall rule aim-allow-spire already exists, skipping"
+# isp-allow-spire: TCP 8081 from Azure VPN CIDR only (internal control-plane traffic)
+if gcloud compute firewall-rules describe "isp-allow-spire" --project="$PROJECT" &>/dev/null; then
+    skip "Firewall rule isp-allow-spire already exists, skipping"
 else
-    gcloud compute firewall-rules create "aim-allow-spire" \
+    gcloud compute firewall-rules create "isp-allow-spire" \
         --project="$PROJECT" \
         --network="$VPC_NAME" \
         --allow=tcp:8081 \
         --source-ranges="10.200.0.0/16" \
         --description="Allow SPIRE agent communication from Azure VPN CIDR only" \
         --quiet
-    info "Created firewall rule aim-allow-spire"
+    info "Created firewall rule isp-allow-spire"
 fi
 
-# aim-allow-agent-http: TCP 8000 from Azure VPN CIDR only → instances tagged aim-agent
-if gcloud compute firewall-rules describe "aim-allow-agent-http" --project="$PROJECT" &>/dev/null; then
-    skip "Firewall rule aim-allow-agent-http already exists, skipping"
+# isp-allow-agent-http: TCP 8000 from Azure VPN CIDR only → instances tagged isp-agent
+if gcloud compute firewall-rules describe "isp-allow-agent-http" --project="$PROJECT" &>/dev/null; then
+    skip "Firewall rule isp-allow-agent-http already exists, skipping"
 else
-    gcloud compute firewall-rules create "aim-allow-agent-http" \
+    gcloud compute firewall-rules create "isp-allow-agent-http" \
         --project="$PROJECT" \
         --network="$VPC_NAME" \
         --allow=tcp:8000 \
         --source-ranges="10.200.0.0/16" \
-        --target-tags=aim-agent \
+        --target-tags=isp-agent \
         --description="Allow HTTP access to Identity Research for Agent Management Using SPIFFE agent endpoint (port 8000) from Azure VPN CIDR" \
         --quiet
-    info "Created firewall rule aim-allow-agent-http"
+    info "Created firewall rule isp-allow-agent-http"
 fi
 echo ""
 
@@ -248,7 +248,7 @@ else
         --subnet="$SUBNET_NAME" \
         --service-account="$SA_EMAIL" \
         --scopes=compute-ro,logging-write,monitoring-write \
-        --tags=aim-agent \
+        --tags=isp-agent \
         --metadata=startup-script="$STARTUP_SCRIPT" \
         --quiet
     info "Created VM ${VM_NAME}"

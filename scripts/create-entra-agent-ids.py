@@ -92,8 +92,8 @@ def print_scope_preflight():
     """Print the exact Entra object names this run will touch."""
     scope = get_scope()
     print("Entra scope:")
-    print(f"  AIM_ENV_SCOPE_MODE: {scope.mode} ({scope.mode_source})")
-    print(f"  AIM_ENV_SCOPE_KEY:  {scope.scope_key} ({scope.key_source})")
+    print(f"  ISP_ENV_SCOPE_MODE: {scope.mode} ({scope.mode_source})")
+    print(f"  ISP_ENV_SCOPE_KEY:  {scope.scope_key} ({scope.key_source})")
     print(f"  Blueprint:          {blueprint_display_name(scope)}")
     for agent_def in AGENTS:
         print(

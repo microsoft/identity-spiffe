@@ -58,7 +58,7 @@ For cloud-only portal changes, prefer:
 ./deploy.sh --portal-only
 ```
 
-That rebuilds and updates `aim-portal` and `securityportal-mock` without restarting agent sidecars or forcing SPIRE re-attestation.
+That rebuilds and updates `isp-portal` and `securityportal-mock` without restarting agent sidecars or forcing SPIRE re-attestation.
 
 ## Operational Notes
 

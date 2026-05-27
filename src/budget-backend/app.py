@@ -346,7 +346,7 @@ async def mgmt_audit_stream(request: Request):
     _check_mgmt_auth(request)
 
     headers = {"Accept": "text/event-stream"}
-    admin_key = request.headers.get("x-aim-admin-key")
+    admin_key = request.headers.get("x-isp-admin-key")
     if admin_key:
         headers["X-Spiffe-Admin-Key"] = admin_key
 

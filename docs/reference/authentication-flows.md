@@ -4,7 +4,7 @@ This page describes the current authentication and authorization flows across br
 
 ## 1. Browser Sign-In For The Portals
 
-Both `aim-portal` and `securityportal-mock` use the same model:
+Both `isp-portal` and `securityportal-mock` use the same model:
 
 1. Browser loads `/api/auth-config`.
 2. If `auth_required=false`, local development bypasses Entra sign-in.

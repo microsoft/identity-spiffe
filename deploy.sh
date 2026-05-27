@@ -151,12 +151,12 @@ if [ "$GOOGLE_AGENT" = true ]; then
             --format "value(status)" 2>/dev/null || true)
         [ -z "$_early_vm" ] && _early_missing=$((_early_missing + 1))
 
-        _early_vpc=$(gcloud compute networks describe aim-crosscloud \
+        _early_vpc=$(gcloud compute networks describe isp-crosscloud \
             --project "$_gcp_project" --format "value(name)" 2>/dev/null || true)
         [ -z "$_early_vpc" ] && _early_missing=$((_early_missing + 1))
 
         _early_vpn=$(gcloud compute vpn-tunnels list --project "$_gcp_project" \
-            --filter "name:aim-vpn" --format "value(name)" 2>/dev/null || true)
+            --filter "name:isp-vpn" --format "value(name)" 2>/dev/null || true)
         [ -z "$_early_vpn" ] && _early_missing=$((_early_missing + 1))
 
         _early_az_vpn=""
@@ -171,7 +171,7 @@ if [ "$GOOGLE_AGENT" = true ]; then
             echo "   ⚠️  GCP environment appears torn down (${_early_missing} core resources missing)."
             echo "   ⚠️  Full rebuild required. Expect ~45 min for VPN Gateway provisioning."
             [ -z "$_early_vm" ]     && echo "      ❌ GCE VM: google-budget-reader"
-            [ -z "$_early_vpc" ]    && echo "      ❌ VPC: aim-crosscloud"
+            [ -z "$_early_vpc" ]    && echo "      ❌ VPC: isp-crosscloud"
             [ -z "$_early_vpn" ]    && echo "      ❌ GCP VPN tunnel"
             [ -z "$_early_az_vpn" ] && echo "      ❌ Azure VPN Gateway"
             echo ""
@@ -426,10 +426,10 @@ build_portal_images() {
 
     echo ""
     echo "🌐 Building portal images..."
-    echo "   Building aim-portal:${IMAGE_TAG} (cache-bust=${cache_bust_val})..."
+    echo "   Building isp-portal:${IMAGE_TAG} (cache-bust=${cache_bust_val})..."
     az acr build \
         --registry "$ACR_NAME" \
-        --image "aim-portal:${IMAGE_TAG}" \
+        --image "isp-portal:${IMAGE_TAG}" \
         --file portal/Dockerfile \
         --build-arg "CACHE_BUST=${cache_bust_val}" \
         --build-arg "BUILD_VERSION=${IMAGE_TAG}" \
@@ -564,23 +564,25 @@ done
 REQUIRE_REAL_CA="${REQUIRE_REAL_CA:-true}"
 
 # ---------------------------------------------------------------------------
-# Enforce aim-* naming convention for azd environments
+# Enforce identity-spiffe / isp-* naming convention for azd environments
 # ---------------------------------------------------------------------------
 # Resource groups are named rg-${AZURE_ENV_NAME}. The detection logic at Step 0
-# searches for rg-aim* — any env not starting with "aim-" becomes invisible to
-# its own environment detection and violates the agreed naming convention.
+# searches for rg-identity-spiffe* and rg-isp-* — any env not matching one of
+# those becomes invisible to its own environment detection and violates the
+# agreed naming convention.
 AZD_ENV_NAME=$(azd env get-values 2>/dev/null | grep -E "^AZURE_ENV_NAME=" | cut -d'=' -f2- | tr -d '"' || true)
-if [ -n "$AZD_ENV_NAME" ] && [[ ! "$AZD_ENV_NAME" =~ ^aim- ]]; then
-    echo "❌ azd environment name '${AZD_ENV_NAME}' does not follow the aim-* naming convention."
-    echo "   Resource group would be 'rg-${AZD_ENV_NAME}' instead of 'rg-aim-*'."
+if [ -n "$AZD_ENV_NAME" ] && [[ ! "$AZD_ENV_NAME" =~ ^(identity-spiffe|isp-) ]]; then
+    echo "❌ azd environment name '${AZD_ENV_NAME}' does not follow the identity-spiffe / isp-* naming convention."
+    echo "   Resource group would be 'rg-${AZD_ENV_NAME}' instead of 'rg-identity-spiffe' or 'rg-isp-*'."
     echo ""
-    echo "   Fix: create a new azd environment with the correct name:"
-    echo "     azd env new identity-spiffe"
+    echo "   Fix: create a new azd environment with a conforming name:"
+    echo "     azd env new identity-spiffe        # default"
+    echo "     azd env select identity-spiffe"
     echo "     ./deploy.sh"
     echo ""
-    echo "   Or rename the current environment:"
-    echo "     azd env new identity-spiffe"
-    echo "     azd env select identity-spiffe"
+    echo "   Or use a scoped name like 'isp-dev':"
+    echo "     azd env new isp-dev"
+    echo "     azd env select isp-dev"
     echo "     ./deploy.sh"
     exit 1
 fi
@@ -601,10 +603,10 @@ if ! validate_entra_scope; then
     exit 1
 fi
 
-if [ "$NEW_ENV" = true ] && [ "${AIM_ENV_SCOPE_MODE_SOURCE:-}" = "auto-legacy" ]; then
+if [ "$NEW_ENV" = true ] && [ "${ISP_ENV_SCOPE_MODE_SOURCE:-}" = "auto-legacy" ]; then
     echo "❌ This azd environment resolved to legacy Entra naming because it already has stored legacy bootstrap IDs."
     echo "   A new deployment must not silently reuse the legacy Blueprint/FIC/group/app objects."
-    echo "   Clear the copied azd env values or set AIM_ENV_SCOPE_MODE=scoped before rerunning."
+    echo "   Clear the copied azd env values or set ISP_ENV_SCOPE_MODE=scoped before rerunning."
     exit 1
 fi
 
@@ -637,10 +639,11 @@ export adminSshPublicKey="${SSH_PUB_KEY:-}"
 # =============================================================================
 # Step 0: Detect existing Identity Research for Agent Management Using SPIFFE environments in the subscription
 # =============================================================================
-# Queries the active subscription for resource groups matching the aim-* naming
-# convention. If an existing environment is found, offers to reuse it (which
-# implies --skip-provision) or proceed with a fresh deployment.
-AIM_RG_PREFIX="rg-aim"
+# Queries the active subscription for resource groups matching the
+# identity-spiffe / isp-* naming convention. If an existing environment is
+# found, offers to reuse it (which implies --skip-provision) or proceed with
+# a fresh deployment.
+ISP_RG_PREFIXES=("rg-identity-spiffe" "rg-isp-")
 
 detect_existing_environment() {
     echo "🔍 Checking for existing Identity Research for Agent Management Using SPIFFE environments in subscription..."
@@ -650,13 +653,18 @@ detect_existing_environment() {
     sub_id=$(az account show --query "id" -o tsv 2>/dev/null || echo "unknown")
     echo "   Subscription: ${sub_name} (${sub_id})"
 
+    local query_filter=""
+    for p in "${ISP_RG_PREFIXES[@]}"; do
+        [ -n "$query_filter" ] && query_filter+=" || "
+        query_filter+="starts_with(name,'${p}')"
+    done
     local existing_rgs
     existing_rgs=$(az group list \
-        --query "[?starts_with(name,'${AIM_RG_PREFIX}')].{name:name, location:location, state:properties.provisioningState}" \
+        --query "[?${query_filter}].{name:name, location:location, state:properties.provisioningState}" \
         -o tsv 2>/dev/null || true)
 
     if [ -z "$existing_rgs" ]; then
-        echo "   No existing Identity Research for Agent Management Using SPIFFE environments found (no resource groups matching '${AIM_RG_PREFIX}*')"
+        echo "   No existing Identity Research for Agent Management Using SPIFFE environments found (no resource groups matching '${ISP_RG_PREFIXES[*]}')"
         echo ""
         return 1
     fi
@@ -823,10 +831,10 @@ RESOURCE_GROUP=$(azd_env_get_from_blob "$AZD_VALUES" "AZURE_RESOURCE_GROUP")
 # Fallback RG discovery when AZURE_RESOURCE_GROUP isn't in azd env
 # (common with --skip-provision on environments created before this was persisted)
 if [ -z "$RESOURCE_GROUP" ]; then
-    RESOURCE_GROUP=$(az group list --query "[?tags.project=='aim-prototype-platform'] | [0].name" -o tsv 2>/dev/null || true)
+    RESOURCE_GROUP=$(az group list --query "[?tags.project=='isp-prototype-platform'] | [0].name" -o tsv 2>/dev/null || true)
 fi
 if [ -z "$RESOURCE_GROUP" ]; then
-    RESOURCE_GROUP=$(az group list --query "[?contains(name,'aim')] | [0].name" -o tsv 2>/dev/null || true)
+    RESOURCE_GROUP=$(az group list --query "[?contains(name,'isp-') || contains(name,'identity-spiffe')] | [0].name" -o tsv 2>/dev/null || true)
 fi
 RG="$RESOURCE_GROUP"
 
@@ -1081,7 +1089,7 @@ echo "   SPIRE Server FQDN: ${SPIRE_SERVER_FQDN}"
 echo "   SPIRE Agent Target: ${SPIRE_AGENT_TARGET} (${SPIRE_SERVER_PRIVATE_IP:+private IP}${SPIRE_SERVER_PRIVATE_IP:-public FQDN})"
 
 # Print portal URLs early so they're visible even if a later step fails
-_EARLY_PORTAL_URL=$(azd_env_get_from_blob "$AZD_VALUES" "SERVICE_AIM_PORTAL_ENDPOINT_URL")
+_EARLY_PORTAL_URL=$(azd_env_get_from_blob "$AZD_VALUES" "SERVICE_ISP_PORTAL_ENDPOINT_URL")
 _EARLY_SECURITY_PORTAL_URL=$(azd_env_get_from_blob "$AZD_VALUES" "SERVICE_SECURITYPORTAL_MOCK_ENDPOINT_URL")
 if [ -n "$_EARLY_PORTAL_URL" ]; then
     echo ""
@@ -1829,22 +1837,22 @@ PORTAL_VIEWER_GROUP_NICKNAME=$(portal_viewer_group_mail_nickname)
 PORTAL_MANAGEMENT_APP_NAME=$(portal_management_app_display_name)
 PORTAL_SECURITYPORTAL_APP_NAME=$(portal_securityportal_app_display_name)
 
-AIM_ADMIN_GROUP_ID=$(azd_env_get_from_blob "$AZD_VALUES" "AIM_ADMIN_GROUP_ID")
-AIM_ADMIN_GROUP_ID=$(ensure_portal_group "$AIM_ADMIN_GROUP_ID" "$PORTAL_ADMIN_GROUP_NAME" "$PORTAL_ADMIN_GROUP_NICKNAME")
+ISP_ADMIN_GROUP_ID=$(azd_env_get_from_blob "$AZD_VALUES" "ISP_ADMIN_GROUP_ID")
+ISP_ADMIN_GROUP_ID=$(ensure_portal_group "$ISP_ADMIN_GROUP_ID" "$PORTAL_ADMIN_GROUP_NAME" "$PORTAL_ADMIN_GROUP_NICKNAME")
 
-AIM_VIEWER_GROUP_ID=$(azd_env_get_from_blob "$AZD_VALUES" "AIM_VIEWER_GROUP_ID")
-AIM_VIEWER_GROUP_ID=$(ensure_portal_group "$AIM_VIEWER_GROUP_ID" "$PORTAL_VIEWER_GROUP_NAME" "$PORTAL_VIEWER_GROUP_NICKNAME")
+ISP_VIEWER_GROUP_ID=$(azd_env_get_from_blob "$AZD_VALUES" "ISP_VIEWER_GROUP_ID")
+ISP_VIEWER_GROUP_ID=$(ensure_portal_group "$ISP_VIEWER_GROUP_ID" "$PORTAL_VIEWER_GROUP_NAME" "$PORTAL_VIEWER_GROUP_NICKNAME")
 
 # Add current user to Identity Research for Agent Management Using SPIFFE Administrators (best-effort)
 CURRENT_USER_OID=$(az ad signed-in-user show --query "id" -o tsv 2>/dev/null || true)
 if [ -n "$CURRENT_USER_OID" ]; then
-    az ad group member add --group "$AIM_ADMIN_GROUP_ID" --member-id "$CURRENT_USER_OID" 2>/dev/null || true
+    az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$CURRENT_USER_OID" 2>/dev/null || true
     echo "   Current user added to Identity Research for Agent Management Using SPIFFE Administrators"
 fi
 
 # Get portal FQDNs for redirect URIs (reload azd values — portal apps were just provisioned)
 AZD_VALUES=$(azd_env_load)
-PORTAL_FQDN=$(azd_env_get_from_blob "$AZD_VALUES" "SERVICE_AIM_PORTAL_ENDPOINT_URL")
+PORTAL_FQDN=$(azd_env_get_from_blob "$AZD_VALUES" "SERVICE_ISP_PORTAL_ENDPOINT_URL")
 PORTAL_FQDN="${PORTAL_FQDN:-}"
 SECURITY_PORTAL_MOCK_FQDN=$(azd_env_get_from_blob "$AZD_VALUES" "SERVICE_SECURITYPORTAL_MOCK_ENDPOINT_URL")
 SECURITY_PORTAL_MOCK_FQDN="${SECURITY_PORTAL_MOCK_FQDN:-}"
@@ -1874,8 +1882,8 @@ else
 fi
 
 # Store group IDs in azd env
-azd env set AIM_ADMIN_GROUP_ID "$AIM_ADMIN_GROUP_ID" 2>/dev/null || true
-azd env set AIM_VIEWER_GROUP_ID "$AIM_VIEWER_GROUP_ID" 2>/dev/null || true
+azd env set ISP_ADMIN_GROUP_ID "$ISP_ADMIN_GROUP_ID" 2>/dev/null || true
+azd env set ISP_VIEWER_GROUP_ID "$ISP_VIEWER_GROUP_ID" 2>/dev/null || true
 
 # Grant admin consent for portal apps (required in tenants with admin consent policy)
 if [ -n "$PORTAL_AUTH_CLIENT_ID" ]; then
@@ -1900,7 +1908,7 @@ GRAPH_CLIENT_SECRET_VAL=$(azd_env_get_from_blob "$AZD_VALUES" "ENTRA_AGENTID_CLI
 ADMIN_CP_URL="${FQDN_ADMIN_CONTROL_PLANE:-}"
 MGMT_KEY="${MGMT_API_KEY:-}"
 AZURE_TENANT="${AZURE_TENANT_ID_VAL:-}"
-PORTAL_MI_CLIENT_ID=$(az containerapp show --name aim-portal --resource-group "$RG" \
+PORTAL_MI_CLIENT_ID=$(az containerapp show --name isp-portal --resource-group "$RG" \
     --query "identity.userAssignedIdentities.*.clientId | [0]" -o tsv 2>/dev/null || true)
 SECURITY_PORTAL_MOCK_MI_CLIENT_ID=$(az containerapp show --name securityportal-mock --resource-group "$RG" \
     --query "identity.userAssignedIdentities.*.clientId | [0]" -o tsv 2>/dev/null || true)
@@ -1914,7 +1922,7 @@ fi
 
 if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
     if [ -z "$PORTAL_MI_CLIENT_ID" ]; then
-        echo "ERROR: aim-portal managed identity client ID could not be resolved." >&2
+        echo "ERROR: isp-portal managed identity client ID could not be resolved." >&2
         exit 1
     fi
     if [ -z "$SECURITY_PORTAL_MOCK_MI_CLIENT_ID" ]; then
@@ -1936,8 +1944,8 @@ if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
         "AZURE_TENANT_ID=${AZURE_TENANT}"
         "AZURE_CLIENT_ID=${PORTAL_MI_CLIENT_ID}"
         "AUTH_CLIENT_ID=${PORTAL_AUTH_CLIENT_ID}"
-        "AIM_ADMIN_GROUP_ID=${AIM_ADMIN_GROUP_ID}"
-        "AIM_VIEWER_GROUP_ID=${AIM_VIEWER_GROUP_ID}"
+        "ISP_ADMIN_GROUP_ID=${ISP_ADMIN_GROUP_ID}"
+        "ISP_VIEWER_GROUP_ID=${ISP_VIEWER_GROUP_ID}"
         "PORTAL_MODE=cloud"
     )
     if [ -n "$STORAGE_ACCOUNT" ]; then
@@ -1958,8 +1966,8 @@ if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
         "AZURE_TENANT_ID=${AZURE_TENANT}"
         "AZURE_CLIENT_ID=${SECURITY_PORTAL_MOCK_MI_CLIENT_ID}"
         "AUTH_CLIENT_ID=${SECURITY_PORTAL_AUTH_CLIENT_ID}"
-        "AIM_ADMIN_GROUP_ID=${AIM_ADMIN_GROUP_ID}"
-        "AIM_VIEWER_GROUP_ID=${AIM_VIEWER_GROUP_ID}"
+        "ISP_ADMIN_GROUP_ID=${ISP_ADMIN_GROUP_ID}"
+        "ISP_VIEWER_GROUP_ID=${ISP_VIEWER_GROUP_ID}"
         "PORTAL_MODE=cloud"
     )
     if [ -n "$GRAPH_CLIENT_ID_VAL" ]; then
@@ -1971,19 +1979,19 @@ if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
         echo "   ⚠️  Graph client credentials are not configured; portal Graph features will be disabled"
     fi
 
-    run_az_step "Failed to set aim-portal secrets" \
+    run_az_step "Failed to set isp-portal secrets" \
         az containerapp secret set \
-        --name aim-portal \
+        --name isp-portal \
         --resource-group "$RG" \
         --secrets "${portal_secret_args[@]}"
 
     # Update Identity Research for Agent Management Using SPIFFE Portal container app
-    echo "   Updating aim-portal container app..."
-    run_az_step "Failed to update aim-portal container app" \
+    echo "   Updating isp-portal container app..."
+    run_az_step "Failed to update isp-portal container app" \
         az containerapp update \
-        --name aim-portal \
+        --name isp-portal \
         --resource-group "$RG" \
-        --image "${ACR_SERVER}/aim-portal:${IMAGE_TAG}" \
+        --image "${ACR_SERVER}/isp-portal:${IMAGE_TAG}" \
         --set-env-vars "${portal_env_vars[@]}"
 
     run_az_step "Failed to set securityportal-mock secrets" \
@@ -2094,10 +2102,10 @@ if [ "$GOOGLE_AGENT" = true ] || [ "$GITHUB_AGENT" = true ]; then
         RESOURCE_GROUP=$(azd_env_get_from_blob "$_cc_azd_values" "AZURE_RESOURCE_GROUP")
     fi
     if [ -z "${RESOURCE_GROUP:-}" ]; then
-        RESOURCE_GROUP=$(az group list --query "[?tags.project=='aim-prototype-platform'] | [0].name" -o tsv 2>/dev/null || true)
+        RESOURCE_GROUP=$(az group list --query "[?tags.project=='isp-prototype-platform'] | [0].name" -o tsv 2>/dev/null || true)
     fi
     if [ -z "${RESOURCE_GROUP:-}" ]; then
-        RESOURCE_GROUP=$(az group list --query "[?contains(name,'aim')] | [0].name" -o tsv 2>/dev/null || true)
+        RESOURCE_GROUP=$(az group list --query "[?contains(name,'isp-') || contains(name,'identity-spiffe')] | [0].name" -o tsv 2>/dev/null || true)
     fi
     if [ -z "${RESOURCE_GROUP:-}" ]; then
         echo "ERROR: Could not discover Azure resource group. Run a full deploy first." >&2
@@ -2123,7 +2131,7 @@ if [ "$GOOGLE_AGENT" = true ] || [ "$GITHUB_AGENT" = true ]; then
     fi
 
     if [ -z "${_EARLY_PORTAL_URL:-}" ]; then
-        _EARLY_PORTAL_URL=$(azd_env_get_from_blob "$_cc_azd_values" "SERVICE_AIM_PORTAL_ENDPOINT_URL")
+        _EARLY_PORTAL_URL=$(azd_env_get_from_blob "$_cc_azd_values" "SERVICE_ISP_PORTAL_ENDPOINT_URL")
     fi
 
     echo ""
@@ -2181,18 +2189,18 @@ if [ "$GOOGLE_AGENT" = true ]; then
 
     # Check VPC
     _gcp_total=$((_gcp_total + 1))
-    _gcp_vpc=$(gcloud compute networks describe aim-crosscloud --project "$GCP_PROJECT" --format "value(name)" 2>/dev/null || true)
+    _gcp_vpc=$(gcloud compute networks describe isp-crosscloud --project "$GCP_PROJECT" --format "value(name)" 2>/dev/null || true)
     if [ -n "$_gcp_vpc" ]; then
-        echo "   ✅ VPC: aim-crosscloud"
+        echo "   ✅ VPC: isp-crosscloud"
     else
-        echo "   ❌ VPC: aim-crosscloud — NOT FOUND"
+        echo "   ❌ VPC: isp-crosscloud — NOT FOUND"
         _gcp_missing=$((_gcp_missing + 1))
     fi
 
     # Check firewall rules
     _gcp_total=$((_gcp_total + 1))
     _gcp_fw_count=$(gcloud compute firewall-rules list --project "$GCP_PROJECT" \
-        --filter "name~aim-" --format "value(name)" 2>/dev/null | wc -l | tr -d ' ')
+        --filter "name~isp-" --format "value(name)" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$_gcp_fw_count" -ge 4 ] 2>/dev/null; then
         echo "   ✅ Firewall rules: $_gcp_fw_count rules"
     else
@@ -2203,7 +2211,7 @@ if [ "$GOOGLE_AGENT" = true ]; then
     # Check VPN tunnel
     _gcp_total=$((_gcp_total + 1))
     _gcp_vpn=$(gcloud compute vpn-tunnels list --project "$GCP_PROJECT" \
-        --filter "name:aim-vpn" --format "value(name)" 2>/dev/null || true)
+        --filter "name:isp-vpn" --format "value(name)" 2>/dev/null || true)
     if [ -n "$_gcp_vpn" ]; then
         echo "   ✅ VPN tunnel: $_gcp_vpn"
     else
@@ -2269,14 +2277,14 @@ if [ "$GOOGLE_AGENT" = true ]; then
 
     # Reserve GCP VPN static IP early so we have the correct peer IP for
     # the Azure Local Network Gateway (not the GCE VM IP).
-    GCP_VPN_IP=$(gcloud compute addresses describe aim-vpn-ip \
+    GCP_VPN_IP=$(gcloud compute addresses describe isp-vpn-ip \
         --region "$GCP_REGION" --project "$GCP_PROJECT" \
         --format "value(address)" 2>/dev/null || true)
     if [ -z "$GCP_VPN_IP" ]; then
         echo "   Reserving GCP VPN static IP..."
-        gcloud compute addresses create aim-vpn-ip \
+        gcloud compute addresses create isp-vpn-ip \
             --region "$GCP_REGION" --project "$GCP_PROJECT" 2>&1
-        GCP_VPN_IP=$(gcloud compute addresses describe aim-vpn-ip \
+        GCP_VPN_IP=$(gcloud compute addresses describe isp-vpn-ip \
             --region "$GCP_REGION" --project "$GCP_PROJECT" \
             --format "value(address)" 2>&1)
     fi
@@ -2320,7 +2328,7 @@ if [ "$GOOGLE_AGENT" = true ]; then
     # --- Step G4: GCP VPN tunnel ---
     echo "🔗 Step G4: GCP VPN tunnel..."
     GCP_TUNNEL=$(gcloud compute vpn-tunnels list --project "$GCP_PROJECT" \
-        --filter "name:aim-vpn" --format "value(name)" 2>/dev/null || true)
+        --filter "name:isp-vpn" --format "value(name)" 2>/dev/null || true)
 
     if [ -z "$GCP_TUNNEL" ]; then
         VPN_KEY=$(azd_env_get_from_blob "$(azd_env_load)" "VPN_SHARED_KEY")
@@ -2351,7 +2359,7 @@ if [ "$GOOGLE_AGENT" = true ]; then
 
     # --- Step G7: Entra provisioning ---
     echo "🔑 Step G7: Entra Agent Identity provisioning..."
-    GCP_SA_EMAIL="aim-agent@${GCP_PROJECT}.iam.gserviceaccount.com"
+    GCP_SA_EMAIL="isp-agent@${GCP_PROJECT}.iam.gserviceaccount.com"
     BB_FQDN=$(az containerapp show -g "$RG" -n budget-backend \
         --query "properties.configuration.ingress.fqdn" -o tsv 2>/dev/null)
 

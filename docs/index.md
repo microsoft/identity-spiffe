@@ -24,7 +24,7 @@ Those checks are intentionally independent. A caller that clears RBAC can still 
 | `spiffe-proxy` sidecar | mTLS, RBAC, JWT enforcement, management API |
 | SPIRE server VM | Issues and rotates X.509 SVIDs for workload identity |
 | `admin-control-plane` | Dedicated external management service for `/mgmt/*` access |
-| `aim-portal` | Management portal for execute, policy, scan, health, and CA operations |
+| `isp-portal` | Management portal for execute, policy, scan, health, and CA operations |
 | `securityportal-mock` | Mock SOC portal that pushes risk signals into Identity Research for Agent Management Using SPIFFE |
 
 ## Documentation Map

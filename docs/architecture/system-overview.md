@@ -8,7 +8,7 @@ This document describes the current runtime architecture after the portal modula
                             Azure Container Apps Environment
 
   Browser
-    -> aim-portal ------------------------\
+    -> isp-portal ------------------------\
     -> securityportal-mock                    \
                                            -> admin-control-plane -> budget-backend /mgmt/*
 
@@ -33,7 +33,7 @@ This document describes the current runtime architecture after the portal modula
 | SPIRE agent | obtains and rotates SVIDs for the workload |
 | SPIRE server VM | trust domain authority and workload attestation |
 | `admin-control-plane` | public management proxy for protected `/mgmt/*` APIs |
-| `aim-portal` | operator UX for execute, policy, health, and governance |
+| `isp-portal` | operator UX for execute, policy, health, and governance |
 | `securityportal-mock` | mock SOC signal source for risk changes |
 
 ## The Four Enforcement Layers

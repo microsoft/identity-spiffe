@@ -42,7 +42,7 @@ param githubRepo string = 'identity-spiffe'
 
 var tags = {
   'azd-env-name': environmentName
-  project: 'aim-prototype-platform'
+  project: 'isp-prototype-platform'
   team: 'identity-spiffe'
   phase: 'phase2-msi'
 }
@@ -90,7 +90,7 @@ module vpnGateway 'modules/vpn-gateway.bicep' = if (gcpVpnPublicIp != '') {
   name: 'vpn-gateway'
   scope: rg
   params: {
-    name: 'aim-vpn-${resourceToken}'
+    name: 'isp-vpn-${resourceToken}'
     location: location
     tags: tags
     gatewaySubnetId: networking.outputs.gatewaySubnetId
@@ -308,12 +308,12 @@ module portalSupport 'modules/portal-support.bicep' = {
 }
 
 module aimPortal 'modules/portal-app.bicep' = {
-  name: 'aim-portal'
+  name: 'isp-portal'
   scope: rg
   params: {
-    name: 'aim-portal'
+    name: 'isp-portal'
     location: location
-    tags: union(tags, { 'azd-service-name': 'aim-portal' })
+    tags: union(tags, { 'azd-service-name': 'isp-portal' })
     environmentId: containerAppsEnv.outputs.environmentId
     registryServer: acr.outputs.loginServer
     acrResourceId: acr.outputs.id
@@ -329,8 +329,8 @@ module aimPortal 'modules/portal-app.bicep' = {
       { name: 'MGMT_API_KEY', secretRef: 'mgmt-api-key' }
       { name: 'AZURE_TENANT_ID', value: azureTenantId }
       { name: 'AUTH_CLIENT_ID', value: portalAuthClientId }
-      { name: 'AIM_ADMIN_GROUP_ID', value: aimAdminGroupId }
-      { name: 'AIM_VIEWER_GROUP_ID', value: aimViewerGroupId }
+      { name: 'ISP_ADMIN_GROUP_ID', value: aimAdminGroupId }
+      { name: 'ISP_VIEWER_GROUP_ID', value: aimViewerGroupId }
       { name: 'GRAPH_CLIENT_ID', secretRef: 'graph-client-id' }
       { name: 'GRAPH_CLIENT_SECRET', secretRef: 'graph-client-secret' }
       { name: 'POLICY_CONFIG_STORE_PROVIDER', value: 'blob' }
@@ -344,7 +344,7 @@ module aimPortal 'modules/portal-app.bicep' = {
 }
 
 module aimPortalPolicyStoreAccess 'modules/portal-policy-store-access.bicep' = {
-  name: 'aim-portal-policy-store-access'
+  name: 'isp-portal-policy-store-access'
   scope: rg
   params: {
     storageAccountName: portalSupport.outputs.policyStoreStorageAccountName
@@ -374,8 +374,8 @@ module securityportalMock 'modules/portal-app.bicep' = {
       { name: 'MGMT_API_KEY', secretRef: 'mgmt-api-key' }
       { name: 'AZURE_TENANT_ID', value: azureTenantId }
       { name: 'AUTH_CLIENT_ID', value: securityportalAuthClientId }
-      { name: 'AIM_ADMIN_GROUP_ID', value: aimAdminGroupId }
-      { name: 'AIM_VIEWER_GROUP_ID', value: aimViewerGroupId }
+      { name: 'ISP_ADMIN_GROUP_ID', value: aimAdminGroupId }
+      { name: 'ISP_VIEWER_GROUP_ID', value: aimViewerGroupId }
       { name: 'GRAPH_CLIENT_ID', secretRef: 'graph-client-id' }
       { name: 'GRAPH_CLIENT_SECRET', secretRef: 'graph-client-secret' }
       { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: portalSupport.outputs.applicationInsightsConnectionString }
@@ -397,7 +397,7 @@ output SERVICE_BUDGET_BACKEND_ENDPOINT_URL string = 'https://${budgetBackend.out
 output SERVICE_EMPLOYEE_MENUS_ENDPOINT_URL string = 'https://${employeeMenus.outputs.fqdn}'
 output SERVICE_BUDGET_APPROVAL_ENDPOINT_URL string = 'https://${budgetApproval.outputs.fqdn}'
 output SERVICE_ADMIN_CONTROL_PLANE_ENDPOINT_URL string = 'https://${adminControlPlane.outputs.fqdn}'
-output SERVICE_AIM_PORTAL_ENDPOINT_URL string = 'https://${aimPortal.outputs.fqdn}'
+output SERVICE_ISP_PORTAL_ENDPOINT_URL string = 'https://${aimPortal.outputs.fqdn}'
 output SERVICE_SECURITYPORTAL_MOCK_ENDPOINT_URL string = 'https://${securityportalMock.outputs.fqdn}'
 // Principal IDs for SPIRE registration (maps MSI identity → SPIFFE ID)
 output BUDGET_REPORT_PRINCIPAL_ID string = budgetReport.outputs.identityPrincipalId

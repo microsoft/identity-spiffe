@@ -27,7 +27,7 @@ from entra_scope import (  # noqa: E402
 
 class EntraScopeTests(unittest.TestCase):
     def test_fresh_environment_defaults_to_scoped(self):
-        env = {"AZURE_ENV_NAME": "aim-second-env"}
+        env = {"AZURE_ENV_NAME": "isp-second-env"}
         persisted = {}
 
         scope = resolve_scope(
@@ -37,13 +37,13 @@ class EntraScopeTests(unittest.TestCase):
         )
 
         self.assertEqual(scope.mode, "scoped")
-        self.assertEqual(scope.scope_key, "aim-second-env")
+        self.assertEqual(scope.scope_key, "isp-second-env")
         self.assertEqual(scope.mode_source, "auto-scoped")
-        self.assertEqual(persisted["AIM_ENV_SCOPE_MODE"], "scoped")
-        self.assertEqual(persisted["AIM_ENV_SCOPE_KEY"], "aim-second-env")
+        self.assertEqual(persisted["ISP_ENV_SCOPE_MODE"], "scoped")
+        self.assertEqual(persisted["ISP_ENV_SCOPE_KEY"], "isp-second-env")
 
     def test_existing_bootstrap_state_defaults_to_legacy(self):
-        env = {"AZURE_ENV_NAME": "aim-existing"}
+        env = {"AZURE_ENV_NAME": "isp-existing"}
         persisted = {"ENTRA_BLUEPRINT_OBJECT_ID": "blueprint-obj"}
 
         scope = resolve_scope(
@@ -53,15 +53,15 @@ class EntraScopeTests(unittest.TestCase):
         )
 
         self.assertEqual(scope.mode, "legacy")
-        self.assertEqual(scope.scope_key, "aim-existing")
+        self.assertEqual(scope.scope_key, "isp-existing")
         self.assertEqual(scope.mode_source, "auto-legacy")
-        self.assertEqual(persisted["AIM_ENV_SCOPE_MODE"], "legacy")
+        self.assertEqual(persisted["ISP_ENV_SCOPE_MODE"], "legacy")
 
     def test_shared_portal_group_ids_do_not_force_legacy(self):
-        env = {"AZURE_ENV_NAME": "aim-existing"}
+        env = {"AZURE_ENV_NAME": "isp-existing"}
         persisted = {
-            "AIM_ADMIN_GROUP_ID": "shared-admin-group-id",
-            "AIM_VIEWER_GROUP_ID": "shared-viewer-group-id",
+            "ISP_ADMIN_GROUP_ID": "shared-admin-group-id",
+            "ISP_VIEWER_GROUP_ID": "shared-viewer-group-id",
         }
 
         scope = resolve_scope(
@@ -74,37 +74,37 @@ class EntraScopeTests(unittest.TestCase):
         self.assertEqual(scope.mode_source, "auto-scoped")
 
     def test_scope_key_sanitization_is_stable(self):
-        self.assertEqual(sanitize_scope_key("Aim__Prod!!!West"), "aim-prod-west")
+        self.assertEqual(sanitize_scope_key("Isp__Prod!!!West"), "isp-prod-west")
         self.assertEqual(sanitize_scope_key("a" * 40), "a" * 32)
 
     def test_scoped_name_generation_matches_contract(self):
         scope = EntraScope(
             mode="scoped",
-            env_name="aim-bc4d",
-            scope_key="aim-bc4d",
+            env_name="isp-bc4d",
+            scope_key="isp-bc4d",
             mode_source="explicit",
             key_source="explicit",
         )
 
         self.assertEqual(
             blueprint_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Budget Backend Agents [aim-bc4d]",
+            "Identity Research for Agent Management Using SPIFFE Budget Backend Agents [isp-bc4d]",
         )
         self.assertEqual(
             agent_identity_display_name("budget-report", scope),
-            "aim-bc4d-budget-report",
+            "isp-bc4d-budget-report",
         )
         self.assertEqual(
             fic_name("budget-report", scope),
-            "aim-fic-bc4d-budget-report",
+            "isp-fic-bc4d-budget-report",
         )
         self.assertEqual(
             portal_management_app_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Portal - Management [aim-bc4d]",
+            "Identity Research for Agent Management Using SPIFFE Portal - Management [isp-bc4d]",
         )
         self.assertEqual(
             portal_securityportal_app_display_name(scope),
-            "Identity Research for Agent Management Using SPIFFE Portal - Security Portal Mock [aim-bc4d]",
+            "Identity Research for Agent Management Using SPIFFE Portal - Security Portal Mock [isp-bc4d]",
         )
         self.assertEqual(
             portal_admin_group_display_name(scope),
@@ -116,18 +116,18 @@ class EntraScopeTests(unittest.TestCase):
         )
         self.assertEqual(
             portal_admin_group_mail_nickname(scope),
-            "aim-administrators",
+            "isp-administrators",
         )
         self.assertEqual(
             portal_viewer_group_mail_nickname(scope),
-            "aim-viewers",
+            "isp-viewers",
         )
 
     def test_legacy_name_generation_matches_current_production_names(self):
         scope = EntraScope(
             mode="legacy",
-            env_name="aim-prod",
-            scope_key="aim-prod",
+            env_name="isp-prod",
+            scope_key="isp-prod",
             mode_source="explicit",
             key_source="explicit",
         )
@@ -138,9 +138,9 @@ class EntraScopeTests(unittest.TestCase):
         )
         self.assertEqual(
             agent_identity_display_name("budget-report", scope),
-            "aim-budget-report",
+            "isp-budget-report",
         )
-        self.assertEqual(fic_name("budget-report", scope), "aim-fic-budget-report")
+        self.assertEqual(fic_name("budget-report", scope), "isp-fic-budget-report")
         self.assertEqual(
             portal_management_app_display_name(scope),
             "Identity Research for Agent Management Using SPIFFE Portal - Management",

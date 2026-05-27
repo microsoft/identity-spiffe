@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from .base import ExternalAgentStore
 
-logger = logging.getLogger("aim-portal.storage.external_agent")
+logger = logging.getLogger("isp-portal.storage.external_agent")
 
 # Required string fields with default values
 _AGENT_DEFAULTS = {

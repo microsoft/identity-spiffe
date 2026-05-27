@@ -24,8 +24,8 @@ Two environment modes exist:
 
 The deploy scripts persist:
 
-- `AIM_ENV_SCOPE_MODE`
-- `AIM_ENV_SCOPE_KEY`
+- `ISP_ENV_SCOPE_MODE`
+- `ISP_ENV_SCOPE_KEY`
 
 New environments default to `scoped`. Existing environments with stored legacy bootstrap state stay `legacy`.
 
@@ -49,21 +49,21 @@ Shared tenant-wide:
 
 ## Naming Rules
 
-Examples for environment `aim-example`:
+Examples for environment `isp-example`:
 
 | Object | Example |
 |---|---|
-| Blueprint | `Identity Research for Agent Management Using SPIFFE Budget Backend Agents [aim-example]` |
-| Agent identity | `aim-aim-example-budget-report` |
-| FIC | `aim-fic-aim-example-budget-report` |
-| Portal management app | `Identity Research for Agent Management Using SPIFFE Portal - Management [aim-example]` |
-| Security Portal app | `Identity Research for Agent Management Using SPIFFE Portal - Security Portal Mock [aim-example]` |
+| Blueprint | `Identity Research for Agent Management Using SPIFFE Budget Backend Agents [isp-example]` |
+| Agent identity | `isp-isp-example-budget-report` |
+| FIC | `isp-fic-isp-example-budget-report` |
+| Portal management app | `Identity Research for Agent Management Using SPIFFE Portal - Management [isp-example]` |
+| Security Portal app | `Identity Research for Agent Management Using SPIFFE Portal - Security Portal Mock [isp-example]` |
 
 ## Safe Deploy Workflow
 
 ```bash
-azd env new aim-example
-azd env select aim-example
+azd env new isp-example
+azd env select isp-example
 ./deploy.sh --new
 ```
 

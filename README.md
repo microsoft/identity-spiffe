@@ -37,7 +37,7 @@ flowchart LR
     end
 
     subgraph ACA["Azure Container Apps Environment"]
-      Portal[aim-portal]
+      Portal[isp-portal]
       SP[securityportal-mock]
       ACP[admin-control-plane]
       subgraph BB["budget-backend pod"]
@@ -138,7 +138,7 @@ The common commands are:
 ```bash
 az login
 azd auth login
-azd env new aim-example
+azd env new isp-example
 
 # Azure-only environment
 ./deploy.sh --new

@@ -63,7 +63,7 @@ az deployment sub create \
     --parameters gcpVpnPublicIp="$GCP_VPN_PUBLIC_IP" \
                  vpnSharedKey="$VPN_SHARED_KEY" \
                  gcpVpcCidr="$GCP_VPC_CIDR" \
-    --name "aim-vpn-$(date +%s)" \
+    --name "isp-vpn-$(date +%s)" \
     2>&1
 
 echo ""

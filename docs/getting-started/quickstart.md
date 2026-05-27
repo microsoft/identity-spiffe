@@ -22,8 +22,8 @@ azd auth login
 Create or select an `azd` environment before deploying:
 
 ```bash
-azd env new aim-myenv
-azd env select aim-myenv
+azd env new isp-myenv
+azd env select isp-myenv
 ```
 
 ## Full Deployment

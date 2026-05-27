@@ -75,7 +75,7 @@ fi
 # ---------------------------------------------------------------------------
 SPIRE_VERSION="1.9.6"
 SPIRE_DIR="/opt/spire"
-AGENT_DIR="/opt/aim-agent"
+AGENT_DIR="/opt/isp-agent"
 TRUST_DOMAIN="gcp.aim.microsoft.com"
 AZURE_TRUST_DOMAIN="aim.microsoft.com"
 GOOGLE_SPIFFE="spiffe://${TRUST_DOMAIN}/ests/bp/${BLUEPRINT_APP_ID}/aid/${GOOGLE_AGENT_ID}"
@@ -582,9 +582,9 @@ fi
 # =====================================================================
 # Step 12: Create systemd unit for demo-agent
 # =====================================================================
-step 13 "Create systemd unit — aim-agent"
+step 13 "Create systemd unit — isp-agent"
 
-cat > /etc/systemd/system/aim-agent.service << EOF
+cat > /etc/systemd/system/isp-agent.service << EOF
 [Unit]
 Description=Identity Research for Agent Management Using SPIFFE Google Budget Reader Agent (FastAPI)
 After=network-online.target gcp-spire-agent.service
@@ -601,14 +601,14 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-info "Wrote aim-agent.service"
+info "Wrote isp-agent.service"
 
 # =====================================================================
 # Step 13: Create systemd unit for spiffe-proxy (egress)
 # =====================================================================
-step 14 "Create systemd unit — aim-spiffe-proxy"
+step 14 "Create systemd unit — isp-spiffe-proxy"
 
-cat > /etc/systemd/system/aim-spiffe-proxy.service << EOF
+cat > /etc/systemd/system/isp-spiffe-proxy.service << EOF
 [Unit]
 Description=SPIFFE Proxy (Egress) for Google Budget Reader
 After=gcp-spire-agent.service
@@ -628,7 +628,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-info "Wrote aim-spiffe-proxy.service"
+info "Wrote isp-spiffe-proxy.service"
 
 # =====================================================================
 # Step 14: Enable and start all services
@@ -638,7 +638,7 @@ step 15 "Enable and start all services"
 systemctl daemon-reload
 
 # Restart services that were already running (config may have changed)
-for SVC in gcp-spire-server gcp-spire-agent aim-agent aim-spiffe-proxy; do
+for SVC in gcp-spire-server gcp-spire-agent isp-agent isp-spiffe-proxy; do
     if systemctl is-active --quiet "${SVC}" 2>/dev/null; then
         info "Restarting ${SVC} (already running, config may have changed)..."
         systemctl restart "${SVC}"
@@ -677,7 +677,7 @@ check "SPIRE agent" "${SPIRE_DIR}/bin/spire-agent" healthcheck \
 
 check "Demo agent (port 8000)" curl -sf http://localhost:8000/health
 
-check "spiffe-proxy (systemd active)" systemctl is-active --quiet aim-spiffe-proxy
+check "spiffe-proxy (systemd active)" systemctl is-active --quiet isp-spiffe-proxy
 
 echo ""
 info "Health checks: ${PASS} passed, ${FAIL} failed"
@@ -686,8 +686,8 @@ if [[ ${FAIL} -gt 0 ]]; then
     warn "Some services are not healthy. Check logs with:"
     echo "  journalctl -u gcp-spire-server --no-pager -n 20"
     echo "  journalctl -u gcp-spire-agent  --no-pager -n 20"
-    echo "  journalctl -u aim-agent        --no-pager -n 20"
-    echo "  journalctl -u aim-spiffe-proxy --no-pager -n 20"
+    echo "  journalctl -u isp-agent        --no-pager -n 20"
+    echo "  journalctl -u isp-spiffe-proxy --no-pager -n 20"
 fi
 
 # =====================================================================
@@ -705,7 +705,7 @@ info ""
 info "systemd services:"
 info "  gcp-spire-server   — SPIRE server"
 info "  gcp-spire-agent    — SPIRE agent (auto-generates join token)"
-info "  aim-agent          — FastAPI demo agent"
-info "  aim-spiffe-proxy   — SPIFFE egress proxy"
+info "  isp-agent          — FastAPI demo agent"
+info "  isp-spiffe-proxy   — SPIFFE egress proxy"
 info ""
 info "All services are enabled and will start on reboot."

@@ -3,7 +3,7 @@
 > Deployment, testing, and identity management scripts.
 
 When only the cloud portal UX/auth surface changed, prefer `./deploy.sh --portal-only`.
-That path rebuilds and updates `aim-portal` + `securityportal-mock` without touching agent sidecars or forcing SPIRE re-attestation.
+That path rebuilds and updates `isp-portal` + `securityportal-mock` without touching agent sidecars or forcing SPIRE re-attestation.
 
 Read alongside:
 
@@ -102,7 +102,7 @@ python3 scripts/create-entra-agent-ids.py
 
 ### What It Does
 
-1. Resolves `AIM_ENV_SCOPE_MODE` / `AIM_ENV_SCOPE_KEY` for the current azd environment
+1. Resolves `ISP_ENV_SCOPE_MODE` / `ISP_ENV_SCOPE_KEY` for the current azd environment
 2. Creates or reuses the current env's Agent Identity Blueprint
 3. Creates or reuses the current env's per-agent identities and FICs
 4. Stores Blueprint IDs plus per-agent Agent Identity `appId` values in `azd env`

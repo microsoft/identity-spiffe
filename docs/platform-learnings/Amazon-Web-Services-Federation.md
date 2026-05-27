@@ -135,7 +135,7 @@ spiffe://<trust-domain>/spire/agent/aws_iid/<account-id>/<region>/<instance-id>
 | `aws_iid:image:id` | `aws_iid:image:id:ami-5fb8c835` |
 | `aws_iid:iamrole` | `aws_iid:iamrole:arn:aws:iam::123456789012:role/SpireAgent` |
 | `aws_iid:sg:id` | `aws_iid:sg:id:sg-01234567` |
-| `aws_iid:tag:key` | `aws_iid:tag:name:aim-agent` |
+| `aws_iid:tag:key` | `aws_iid:tag:name:isp-agent` |
 
 **Security model:** TOFU, same as `gcp_iit`. A given EC2 instance can only attest once. Also includes an anti-tampering check: verifies the root volume has not been detached (`skip_block_device = false` by default).
 

@@ -10,7 +10,7 @@ from shared.graph_token import get_graph_token
 
 from ..errors import PortalError
 
-logger = logging.getLogger("aim-portal.clients.graph")
+logger = logging.getLogger("isp-portal.clients.graph")
 
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 

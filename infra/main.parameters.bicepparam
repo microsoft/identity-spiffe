@@ -1,6 +1,6 @@
 using './main.bicep'
 
-param environmentName = readEnvironmentVariable('AZURE_ENV_NAME', 'aim-poc')
+param environmentName = readEnvironmentVariable('AZURE_ENV_NAME', 'isp-poc')
 param location = 'westus'
 
 // Phase 2: MSI attestation — no tokens needed!

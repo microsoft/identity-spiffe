@@ -3017,7 +3017,7 @@ function renderLogs(root) {
     var blob = new Blob([data], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
-    a.href = url; a.download = 'aim-audit-' + Date.now() + '.json';
+    a.href = url; a.download = 'isp-audit-' + Date.now() + '.json';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
   };

@@ -21,17 +21,17 @@
 #   ./scripts/bootstrap-gcp-project.sh
 #
 # Optional env vars:
-#   GCP_PROJECT_ID   — project ID to create (default: aim-crosscloud-poc)
+#   GCP_PROJECT_ID   — project ID to create (default: isp-crosscloud-poc)
 #   GCP_BILLING_ID   — billing account ID (prompted if not set)
 #   GCP_REGION       — default: us-west1
 #   GCP_ORG_ID       — optional, org to create project under
 # =============================================================================
 set -euo pipefail
 
-GCP_PROJECT_ID="${GCP_PROJECT_ID:-aim-crosscloud-poc}"
+GCP_PROJECT_ID="${GCP_PROJECT_ID:-isp-crosscloud-poc}"
 GCP_REGION="${GCP_REGION:-us-west1}"
 GCP_ORG_ID="${GCP_ORG_ID:-}"
-GCP_SA_NAME="${GCP_SA_NAME:-aim-agent}"
+GCP_SA_NAME="${GCP_SA_NAME:-isp-agent}"
 
 echo "============================================="
 echo "  Identity Research for Agent Management Using SPIFFE Prototype — GCP Project Bootstrap"
