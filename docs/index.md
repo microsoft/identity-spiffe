@@ -6,6 +6,12 @@ Identity Research for Agent Management Using SPIFFE demonstrates sidecar-enforce
 
 The platform combines five independent enforcement checks:
 
+<p align="center">
+  <img src="assets/portal/enforcement-flow.png" alt="Request enforcement flow: Caller Agent → Egress Proxy → Layer 1 mTLS → Layer 2 RBAC → Layer 3 OAuth/JWT → Layer 4 CA → Backend App" style="max-width: 100%;">
+  <br>
+  <em>Live view from the portal's <strong>Enforcement Layers</strong> page — every governed request walks all four layers before the backend ever sees it.</em>
+</p>
+
 | Layer | Enforcement point | What it answers |
 |---|---|---|
 | Layer 1 | SPIFFE/SPIRE mTLS in the sidecar | Which callers may establish a connection |
