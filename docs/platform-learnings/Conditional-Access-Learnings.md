@@ -18,7 +18,7 @@
 7. [Claims Challenge Flow](#claims-challenge-flow)
 8. [Graph API for CA Policies](#graph-api-for-ca-policies)
 9. [Limitations and Restrictions](#limitations-and-restrictions)
-10. [How This Maps to Identity Research for Agent Management Using SPIFFE PoC](#how-this-maps-to-aim-poc)
+10. [How This Maps to Identity Research for Agent Management Using SPIFFE PoC](#how-this-maps-to-isp-poc)
 11. [Key Terminology](#key-terminology)
 12. [References](#references)
 

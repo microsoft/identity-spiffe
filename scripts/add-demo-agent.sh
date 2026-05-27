@@ -61,7 +61,7 @@ ACR_NAME=$(echo "$ACR_SERVER" | cut -d'.' -f1 || true)
 SPIRE_SERVER_FQDN=$(azd_env_get_from_blob "$AZD_ENV" "SPIRE_SERVER_FQDN")
 
 if [ -z "$RG" ]; then
-    RG=$(az group list --query "[?starts_with(name,'aim-') || starts_with(name,'rg-aim')].name" -o tsv 2>/dev/null | head -1 || true)
+    RG=$(az group list --query "[?starts_with(name,'isp-') || starts_with(name,'rg-isp-') || starts_with(name,'rg-identity-spiffe')].name" -o tsv 2>/dev/null | head -1 || true)
 fi
 if [ -z "$ACR_NAME" ]; then
     ACR_NAME=$(az acr list --resource-group "$RG" --query "[0].name" -o tsv 2>/dev/null | head -1 || true)

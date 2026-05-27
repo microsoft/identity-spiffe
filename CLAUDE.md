@@ -19,10 +19,10 @@
 - Agent workloads run on Azure Container Apps with a Go `spiffe-proxy` sidecar and a SPIRE agent sidecar.
 - SPIRE server runs on an Azure VM.
 - `admin-control-plane` owns the public management path to protected `/mgmt/*` APIs.
-- `aim-portal` and `securityportal-mock` are separate Container Apps with Entra browser sign-in.
+- `isp-portal` and `securityportal-mock` are separate Container Apps with Entra browser sign-in.
 - The portal backend is modular under `portal/app/`; `portal/server.py` is a thin wrapper.
 - Cloud policy config persistence uses Azure Blob Storage through managed identity.
-- Portal auth groups are shared tenant-wide: `Identity Research for Agent Management Using SPIFFE Administrators` and `Identity Research for Agent Management Using SPIFFE Viewers`.
+- Portal auth groups are shared tenant-wide: `Agent Management Administrators` and `Agent Management Viewers`.
 - New environments default to environment-scoped Entra names for Blueprints, Agent Identities, FICs, and portal app registrations.
 
 ## Deploy Guidance

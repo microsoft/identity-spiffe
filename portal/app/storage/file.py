@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 from .base import PolicyConfigStore
 
-logger = logging.getLogger("aim-portal.storage.file")
+logger = logging.getLogger("isp-portal.storage.file")
 
 
 class FilePolicyConfigStore(PolicyConfigStore):

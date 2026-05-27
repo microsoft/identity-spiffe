@@ -80,11 +80,20 @@ func InjectHeaders(data []byte, id CallerIdentity) ([]byte, error) {
 	}
 	defer req.Body.Close()
 
-	// Strip ALL existing X-SPIFFE-* headers and X-Request-ID (prevent spoofing).
+	// Strip existing identity-bearing X-SPIFFE-* headers and X-Request-ID
+	// to prevent spoofing. The shared-secret X-Spiffe-Admin-Key header is
+	// preserved — it is not an identity assertion but a control-plane
+	// credential that admin-control-plane forwards to budget-backend's
+	// /mgmt/* routes, and stripping it breaks the portal health probe and
+	// every other ACP → backend management call.
 	for key := range req.Header {
-		if strings.HasPrefix(key, "X-Spiffe-") {
-			req.Header.Del(key)
+		if !strings.HasPrefix(key, "X-Spiffe-") {
+			continue
 		}
+		if strings.EqualFold(key, "X-Spiffe-Admin-Key") {
+			continue
+		}
+		req.Header.Del(key)
 	}
 	req.Header.Del("X-Request-ID")
 

@@ -249,7 +249,7 @@ echo "⚙️  Step 5/6 — Configuring spiffe-proxy egress service..."
 # ALLOWED_REMOTE_SPIFFE_ID, SPIRE_SOCKET_PATH. CLI flags are NOT supported (see
 # src/spiffe-proxy/cmd/main.go:45-60). Any prior unit using `agent-proxy -workloadSocket`
 # was silently falling back to stale defaults.
-cat > /etc/systemd/system/aim-spiffe-proxy.service << PROXYFILE
+cat > /etc/systemd/system/isp-spiffe-proxy.service << PROXYFILE
 [Unit]
 Description=Identity Research for Agent Management Using SPIFFE spiffe-proxy (egress — to ${BUDGET_BACKEND_FQDN:-<unset>})
 After=spire-agent.service
@@ -271,10 +271,10 @@ WantedBy=multi-user.target
 PROXYFILE
 
 systemctl daemon-reload
-systemctl enable aim-spiffe-proxy
+systemctl enable isp-spiffe-proxy
 
 if [[ -f "${SPIRE_DIR}/bin/spiffe-proxy" ]] && systemctl is-active spire-agent >/dev/null 2>&1; then
-    systemctl restart aim-spiffe-proxy
+    systemctl restart isp-spiffe-proxy
     echo "  ✅ spiffe-proxy egress → ${BUDGET_BACKEND_FQDN:-<unset>}:8443 (listening on 127.0.0.1:${PROXY_PORT})"
 else
     echo "  ⚠️  spiffe-proxy service configured but not started (prereqs not ready)"
@@ -312,5 +312,5 @@ echo "  Entra Agent OID:    ${AGENT_IDENTITY_ID:-PLACEHOLDER}"
 echo "  Env file:           /etc/identity-spiffe-github-runner.env"
 echo ""
 echo "  Check services:"
-echo "    systemctl status spire-agent aim-spiffe-proxy actions.runner.*"
+echo "    systemctl status spire-agent isp-spiffe-proxy actions.runner.*"
 echo ""

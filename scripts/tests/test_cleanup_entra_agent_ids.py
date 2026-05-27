@@ -30,8 +30,8 @@ class CleanupEntraAgentIdsTests(unittest.TestCase):
     def test_scoped_cleanup_targets_only_current_env_prefix(self):
         scope = EntraScope(
             mode="scoped",
-            env_name="aim-bc4d",
-            scope_key="aim-bc4d",
+            env_name="isp-bc4d",
+            scope_key="isp-bc4d",
             mode_source="explicit",
             key_source="explicit",
         )
@@ -48,19 +48,19 @@ class CleanupEntraAgentIdsTests(unittest.TestCase):
 
         def fake_graph_request(method, path, token, retry=True):
             queried_paths.append(path)
-            return Response(200, {"value": [{"id": "sp1", "displayName": "aim-aim-bc4d-budget-report"}]})
+            return Response(200, {"value": [{"id": "sp1", "displayName": "isp-isp-bc4d-budget-report"}]})
 
         with patch.object(self.module, "graph_request", side_effect=fake_graph_request):
             targets = self.module.find_target_service_principals("token", scope, all_envs=False)
 
         self.assertEqual(len(targets), 1)
-        self.assertIn("startswith(displayName,'aim-aim-bc4d-')", queried_paths[0])
+        self.assertIn("startswith(displayName,'isp-isp-bc4d-')", queried_paths[0])
 
     def test_all_envs_cleanup_remains_explicit(self):
         scope = EntraScope(
             mode="scoped",
-            env_name="aim-bc4d",
-            scope_key="aim-bc4d",
+            env_name="isp-bc4d",
+            scope_key="isp-bc4d",
             mode_source="explicit",
             key_source="explicit",
         )
@@ -82,20 +82,20 @@ class CleanupEntraAgentIdsTests(unittest.TestCase):
         with patch.object(self.module, "graph_request", side_effect=fake_graph_request):
             self.module.find_target_service_principals("token", scope, all_envs=True)
 
-        self.assertEqual(queried_paths[0], "/servicePrincipals?$filter=startswith(displayName,'aim-')")
+        self.assertEqual(queried_paths[0], "/servicePrincipals?$filter=startswith(displayName,'isp-')")
 
     def test_legacy_demo_fic_name_maps_back_to_current_env_sp_name(self):
         scope = EntraScope(
             mode="legacy",
-            env_name="aim-prod",
-            scope_key="aim-prod",
+            env_name="isp-prod",
+            scope_key="isp-prod",
             mode_source="explicit",
             key_source="explicit",
         )
 
         self.assertEqual(
-            self.module.derive_sp_name_from_fic_name("aim-fic-audit-reviewer", scope),
-            "aim-audit-reviewer",
+            self.module.derive_sp_name_from_fic_name("isp-fic-audit-reviewer", scope),
+            "isp-audit-reviewer",
         )
 
 

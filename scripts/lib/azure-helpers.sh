@@ -197,7 +197,7 @@ azure_vm_run() {
     # VMs. Without a pause after delete, the next create arrives while the agent
     # is still cleaning up the RunCommandHandler extension, causing empty output,
     # silent failures, or a permanently wedged agent queue.
-    # See hard-won-learnings #20 and the 2026-04-03 aim-crosscloud deploy stall.
+    # See hard-won-learnings #20 and the 2026-04-03 isp-crosscloud deploy stall.
     sleep 10
 
     if [ "$state" != "Succeeded" ]; then

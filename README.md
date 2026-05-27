@@ -18,6 +18,12 @@ This repository is the public baseline for Identity Research for Agent Managemen
 
 Every governed call passes through independent checks. Any failed layer denies the request.
 
+<p align="center">
+  <img src="docs/assets/portal/enforcement-flow.png" alt="Request enforcement flow: Caller Agent → Egress Proxy → Layer 1 mTLS → Layer 2 RBAC → Layer 3 OAuth/JWT → Layer 4 CA → Backend App" width="100%">
+  <br>
+  <em>The live <strong>Enforcement Layers</strong> view in the portal — every governed request walks all four layers before the backend ever sees it.</em>
+</p>
+
 | Layer | Enforcement point | Denies when |
 |---:|---|---|
 | 1 | SPIFFE/SPIRE mTLS in `spiffe-proxy` | Caller SPIFFE ID is not allowed by the target |
@@ -37,7 +43,7 @@ flowchart LR
     end
 
     subgraph ACA["Azure Container Apps Environment"]
-      Portal[aim-portal]
+      Portal[isp-portal]
       SP[securityportal-mock]
       ACP[admin-control-plane]
       subgraph BB["budget-backend pod"]
@@ -138,10 +144,10 @@ The common commands are:
 ```bash
 az login
 azd auth login
-azd env new aim-example
+azd env new isp-example
 
-# Azure-only environment
-./deploy.sh --new
+# Azure-only environment (seed the portal admin with the identity you'll sign in as)
+./deploy.sh --new --with-admin=you@your-tenant.com
 
 # Existing environment, code changes only
 ./deploy.sh --skip-provision
@@ -151,11 +157,70 @@ azd env new aim-example
 ./deploy.sh --new --github
 ```
 
+> **Portal sign-in tip.** `deploy.sh` only adds the signed-in `az login` user
+> to the `Agent Management Administrators` group by default. If you'll sign
+> into the portal with a different identity, pass `--with-admin=<upn>`
+> (repeatable) or set `ISP_INITIAL_ADMINS=alice@contoso.com,bob@contoso.com`.
+> Use `./scripts/portal-members.sh add-admin <upn>` to add more admins (or
+> `add-viewer`, `remove-admin`, `list`) after deploy.
+
 Important deployment rules:
 
 - Do not use `azd deploy <service>` for agent services. Use `./deploy.sh --skip-provision` or `./scripts/reattest.sh`.
 - Do not use `az containerapp update --set-env-vars` on multi-container apps. Export full YAML, edit it, then reimport.
 - Do not use `az vm run-command invoke`. Use the helper path that calls `az vm run-command create --timeout-in-seconds`.
+
+## Portal tour
+
+The portal (`isp-portal`) is the operator surface for everything the sidecars
+enforce — a live read of policy, identity, transport, and audit, plus the
+controls to change them. Sign-in is gated by Entra; group membership in
+`Agent Management Administrators` unlocks the policy editor and network
+controls, `Agent Management Viewers` gets read-only access.
+
+<p align="center">
+  <a href="docs/assets/portal/overview.png">
+    <img src="docs/assets/portal/overview.png" alt="Portal overview dashboard — Live Healthy badge, security scan, summary cards, and agent connection flow with allowed vs blocked callers" width="100%">
+  </a>
+  <br>
+  <em>The overview dashboard at a glance — live health, one-click security scan, and the agent connection flow color-coded by enforcement decision.</em>
+</p>
+
+<table align="center">
+  <tr>
+    <td align="center" width="50%">
+      <a href="docs/assets/portal/test-calls.png">
+        <img src="docs/assets/portal/test-calls.png" alt="Test Calls — pick a caller, fire a request at the backend, see the live SPIFFE/Entra identity chain and the access log decision per layer" width="100%">
+      </a>
+      <br>
+      <strong>Test Calls</strong><br>
+      <sub>Fire real requests through the live SPIFFE egress proxy and watch the identity chain, response, and access log decisions land in real time.</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="docs/assets/portal/enforcement-layers.png">
+        <img src="docs/assets/portal/enforcement-layers.png" alt="Enforcement Layers — request flow diagram plus per-agent tables for mTLS allow list and active RBAC policy rules" width="100%">
+      </a>
+      <br>
+      <strong>Enforcement Layers</strong><br>
+      <sub>Read-only status across all four layers — mTLS allow list, RBAC rules, OAuth role bindings, and CA governance — pulled live from the sidecar.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <a href="docs/assets/portal/a2a-test-call.png">
+        <img src="docs/assets/portal/a2a-test-call.png" alt="A2A direct call — BudgetReport → EmployeeMenus over HTTPS, blocked at the target by Conditional Access tag mismatch (caller_tag=finance vs target_tag=HR), JWT validated and risk low" width="100%">
+      </a>
+      <br>
+      <strong>Agent-to-agent (A2A) governance</strong><br>
+      <sub>Direct HTTPS call <em>between</em> agents — bypassing the SPIFFE tunnel — so the <strong>target</strong> enforces JWT, Conditional Access tags, and risk at the application layer. Here BudgetReport (<code>finance</code>) tries to read EmployeeMenus (<code>HR</code>): JWT validates and risk is low, but the CA tag mismatch returns a clean <code>403 agent_tag_mismatch</code> with the exact enforcement layer that denied it.</sub>
+    </td>
+  </tr>
+</table>
+
+Behind those screens are dedicated **Network Access**, **Policy Editor**,
+**System Health**, **Test Calls**, and **Logs** pages. See the
+[architecture overview](https://microsoft.github.io/identity-spiffe/architecture/system-overview/)
+for how each page maps to a sidecar or control-plane API.
 
 ## Repository map
 

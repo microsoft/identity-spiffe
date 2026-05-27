@@ -73,7 +73,7 @@ fi
 RG_NAME=$(azd_env_get_from_blob "$AZD_ENV" "AZURE_RESOURCE_GROUP")
 # 2. Search by project tag (works across env renames)
 if [[ -z "$RG_NAME" ]]; then
-    RG_NAME=$(az group list --query "[?tags.project=='aim-prototype-platform'] | [0].name" -o tsv 2>/dev/null || true)
+    RG_NAME=$(az group list --query "[?tags.project=='isp-prototype-platform'] | [0].name" -o tsv 2>/dev/null || true)
 fi
 # 3. Search by azd-env-name tag matching current env
 if [[ -z "$RG_NAME" ]]; then
@@ -81,7 +81,7 @@ if [[ -z "$RG_NAME" ]]; then
 fi
 # 4. Search for any RG with Identity Research for Agent Management Using SPIFFE container apps
 if [[ -z "$RG_NAME" ]]; then
-    RG_NAME=$(az group list --query "[?contains(name,'aim')] | [0].name" -o tsv 2>/dev/null || true)
+    RG_NAME=$(az group list --query "[?contains(name,'isp-') || contains(name,'identity-spiffe')] | [0].name" -o tsv 2>/dev/null || true)
 fi
 # 5. Last resort: convention
 if [[ -z "$RG_NAME" ]]; then

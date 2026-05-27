@@ -3,7 +3,7 @@
 > Deployment, testing, and identity management scripts.
 
 When only the cloud portal UX/auth surface changed, prefer `./deploy.sh --portal-only`.
-That path rebuilds and updates `aim-portal` + `securityportal-mock` without touching agent sidecars or forcing SPIRE re-attestation.
+That path rebuilds and updates `isp-portal` + `securityportal-mock` without touching agent sidecars or forcing SPIRE re-attestation.
 
 Read alongside:
 
@@ -27,6 +27,7 @@ Read alongside:
 | `reattest.sh` | Bash | ~110 | Re-attest agents with fresh join tokens. **Run this EVERY TIME a Container App revision is created/restarted.** Lightweight fix — no rebuild, no Entra changes, just fresh tokens (~30s per agent). Usage: `./scripts/reattest.sh` (all) or `./scripts/reattest.sh admin-control-plane` (one) |
 | `add-demo-agent.sh` | Bash | ~350 | Dynamically add a demo agent to running deployment |
 | `remove-demo-agent.sh` | Bash | ~130 | Remove a dynamically-added demo agent |
+| `portal-members.sh` | Bash | small | Add/remove/list members of the portal Administrators/Viewers groups post-deploy. Usage: `./scripts/portal-members.sh add-admin <upn>` |
 | `teardown.sh` | Bash | ~80 | Clean teardown of all resources |
 
 ---
@@ -102,7 +103,7 @@ python3 scripts/create-entra-agent-ids.py
 
 ### What It Does
 
-1. Resolves `AIM_ENV_SCOPE_MODE` / `AIM_ENV_SCOPE_KEY` for the current azd environment
+1. Resolves `ISP_ENV_SCOPE_MODE` / `ISP_ENV_SCOPE_KEY` for the current azd environment
 2. Creates or reuses the current env's Agent Identity Blueprint
 3. Creates or reuses the current env's per-agent identities and FICs
 4. Stores Blueprint IDs plus per-agent Agent Identity `appId` values in `azd env`

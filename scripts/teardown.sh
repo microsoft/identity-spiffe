@@ -7,11 +7,17 @@
 #   2. Runs azd down --force --purge
 #   3. Clears stale azd env variables
 #   4. Optionally tears down GCP resources (--google)
+#   5. Optionally purges Entra directory objects (--purge-entra)
 #
 # Usage:
-#   ./scripts/teardown.sh              # full teardown
-#   ./scripts/teardown.sh --google     # also tear down GCP cross-cloud resources
-#   ./scripts/teardown.sh --skip-azd   # clean up env only (azd down already run)
+#   ./scripts/teardown.sh                  # full Azure teardown, Entra preserved
+#   ./scripts/teardown.sh --google         # also tear down GCP cross-cloud resources
+#   ./scripts/teardown.sh --skip-azd       # clean up env only (azd down already run)
+#   ./scripts/teardown.sh --purge-entra    # also delete Entra apps + portal groups
+#                                          # (Blueprint, Provisioner, Portal,
+#                                          #  Security Portal Mock, Admin/Viewer
+#                                          #  groups). Required for a true
+#                                          #  clean-room first-run test.
 # =============================================================================
 set -euo pipefail
 
@@ -19,18 +25,25 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKIP_AZD=false
 GOOGLE=false
+PURGE_ENTRA=false
 
 for arg in "$@"; do
     case $arg in
-        --skip-azd) SKIP_AZD=true ;;
-        --google)   GOOGLE=true ;;
+        --skip-azd)     SKIP_AZD=true ;;
+        --google)       GOOGLE=true ;;
+        --purge-entra)  PURGE_ENTRA=true ;;
         --help|-h)
             echo "Usage: ./scripts/teardown.sh [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --skip-azd   Skip azd down (clean up env only)"
-            echo "  --google     Also tear down GCP cross-cloud resources"
-            echo "  --help       Show this help"
+            echo "  --skip-azd       Skip azd down (clean up env only)"
+            echo "  --google         Also tear down GCP cross-cloud resources"
+            echo "  --purge-entra    Also delete Entra directory objects:"
+            echo "                   Blueprint app (+ child Agent Identities + FICs),"
+            echo "                   Provisioner app, Portal app, Security Portal Mock app,"
+            echo "                   and the Administrators/Viewers groups."
+            echo "                   Required for a true clean-room first-run test."
+            echo "  --help           Show this help"
             exit 0
             ;;
     esac
@@ -150,9 +163,114 @@ else
     echo ""
 fi
 
-# ─── Step 5: Wait for soft-delete propagation ─────────────────────────────
+# ─── Step 5: Optional Entra directory purge ───────────────────────────────
 
-echo "⏳ Step 5: Waiting 30s for resource soft-delete propagation..."
+if [ "$PURGE_ENTRA" = true ]; then
+    echo "🧨 Step 5: Purging Entra directory objects..."
+    echo "   This deletes Blueprint, Provisioner, Portal, Security Portal Mock"
+    echo "   apps and the Administrators/Viewers groups. Cannot be undone."
+    echo ""
+
+    AZD_VALUES_NOW=$(cd "$REPO_ROOT" && azd env get-values 2>/dev/null || true)
+
+    _val() {
+        printf '%s\n' "$AZD_VALUES_NOW" | grep "^${1}=" | head -1 | cut -d'=' -f2- | tr -d '"'
+    }
+
+    delete_app() {
+        # Args: friendly_label, app_id_or_empty
+        local label="$1"
+        local app_id="$2"
+        if [ -z "$app_id" ]; then
+            echo "   ⏭  ${label}: no app id in azd env, skipping"
+            return 0
+        fi
+        local name
+        name=$(az ad app show --id "$app_id" --query "displayName" -o tsv 2>/dev/null || true)
+        if [ -z "$name" ]; then
+            echo "   ⏭  ${label} (${app_id}): already deleted"
+            return 0
+        fi
+        if az ad app delete --id "$app_id" 2>/dev/null; then
+            echo "   ✅ Deleted ${label}: ${name} (${app_id})"
+        else
+            echo "   ⚠  ${label} (${app_id}): delete failed — you may need Application.ReadWrite.All" >&2
+        fi
+    }
+
+    delete_group() {
+        local label="$1"
+        local group_id="$2"
+        if [ -z "$group_id" ]; then
+            echo "   ⏭  ${label}: no group id in azd env, skipping"
+            return 0
+        fi
+        local name
+        name=$(az ad group show --group "$group_id" --query "displayName" -o tsv 2>/dev/null || true)
+        if [ -z "$name" ]; then
+            echo "   ⏭  ${label} (${group_id}): already deleted"
+            return 0
+        fi
+        if az ad group delete --group "$group_id" 2>/dev/null; then
+            echo "   ✅ Deleted ${label}: ${name} (${group_id})"
+        else
+            echo "   ⚠  ${label} (${group_id}): delete failed — you may need Group.ReadWrite.All" >&2
+        fi
+    }
+
+    # Apps. Deleting the Blueprint app cascades to its child Agent Identities
+    # and federated credentials. The Provisioner / Portal / Security Portal Mock
+    # apps are siblings and must be deleted explicitly.
+    delete_app "Blueprint app"            "$(_val ENTRA_BLUEPRINT_APP_ID)"
+    delete_app "Provisioner app"          "$(_val ENTRA_AGENTID_CLIENT_ID)"
+    delete_app "Portal management app"    "$(_val PORTAL_AUTH_CLIENT_ID)"
+    delete_app "Security Portal Mock app" "$(_val SECURITYPORTAL_AUTH_CLIENT_ID)"
+
+    # Portal groups
+    delete_group "Administrators group" "$(_val ISP_ADMIN_GROUP_ID)"
+    delete_group "Viewers group"        "$(_val ISP_VIEWER_GROUP_ID)"
+
+    # Clear the related env vars so the next deploy creates fresh objects
+    # rather than trying to look up tombstoned IDs.
+    ENTRA_VARS=(
+        ENTRA_BLUEPRINT_APP_ID
+        ENTRA_BLUEPRINT_OBJECT_ID
+        ENTRA_AGENTID_CLIENT_ID
+        ENTRA_AGENTID_CLIENT_SECRET
+        ENTRA_AGENT_ID_BUDGET_REPORT
+        ENTRA_AGENT_ID_BUDGET_BACKEND
+        ENTRA_AGENT_ID_EMPLOYEE_MENUS
+        ENTRA_AGENT_ID_BUDGET_APPROVAL
+        ENTRA_AGENT_ID_ADMIN_CONTROL_PLANE
+        ENTRA_FIC_CREATED_BUDGET_REPORT
+        ENTRA_FIC_CREATED_BUDGET_APPROVAL
+        ENTRA_FIC_CREATED_EMPLOYEE_MENUS
+        ENTRA_OAUTH2_APP_ROLES_READY
+        ENTRA_OAUTH2_AUDIENCE
+        PORTAL_AUTH_CLIENT_ID
+        SECURITYPORTAL_AUTH_CLIENT_ID
+        ISP_ADMIN_GROUP_ID
+        ISP_VIEWER_GROUP_ID
+    )
+    for var in "${ENTRA_VARS[@]}"; do
+        CURRENT=$(cd "$REPO_ROOT" && azd env get-values 2>/dev/null | grep "^${var}=" | cut -d'=' -f2 | tr -d '"' || true)
+        if [ -n "$CURRENT" ]; then
+            cd "$REPO_ROOT" && azd env set "$var" "" 2>/dev/null
+            echo "   Cleared azd env: ${var}"
+        fi
+    done
+    echo ""
+else
+    echo "⏭  Step 5: Entra directory preserved (use --purge-entra to delete)"
+    echo "   Blueprint, Provisioner, Portal apps, and admin groups stay so the"
+    echo "   next ./deploy.sh reuses them. Run with --purge-entra for a true"
+    echo "   clean-room test."
+    echo ""
+fi
+
+# ─── Step 6: Wait for soft-delete propagation ─────────────────────────────
+
+echo "⏳ Step 6: Waiting 30s for resource soft-delete propagation..."
 echo "   (Prevents IfMatchPreconditionFailed on next deploy)"
 sleep 30
 echo "   Done."

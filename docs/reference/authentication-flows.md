@@ -4,7 +4,7 @@ This page describes the current authentication and authorization flows across br
 
 ## 1. Browser Sign-In For The Portals
 
-Both `aim-portal` and `securityportal-mock` use the same model:
+Both `isp-portal` and `securityportal-mock` use the same model:
 
 1. Browser loads `/api/auth-config`.
 2. If `auth_required=false`, local development bypasses Entra sign-in.
@@ -31,7 +31,7 @@ Validation requirements:
 - correct Entra tenant
 - correct audience for the portal app registration
 - valid signature from Entra JWKS
-- caller belongs to `Identity Research for Agent Management Using SPIFFE Administrators` or `Identity Research for Agent Management Using SPIFFE Viewers`
+- caller belongs to `Agent Management Administrators` or `Agent Management Viewers`
 
 Failures are explicit:
 
@@ -98,8 +98,8 @@ New environments use env-scoped names for:
 
 These stay shared tenant-wide:
 
-- `Identity Research for Agent Management Using SPIFFE Administrators`
-- `Identity Research for Agent Management Using SPIFFE Viewers`
+- `Agent Management Administrators`
+- `Agent Management Viewers`
 - the provisioner app
 - the Conditional Access schema and generic policy model
 

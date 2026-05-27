@@ -87,7 +87,7 @@ The verification suite now includes:
 - `--skip-provision`: Skip Steps 1+2, resume from Step 3. Use after a failed deploy when infra is already up.
 - `--skip-provisioning`: Alias for `--skip-provision`.
 - `--skip-build`: Skip the Docker build in Step 3. Use when redeploying with an existing image tag.
-- `--portal-only`: Build and update only `aim-portal` and `securityportal-mock`, then refresh portal auth wiring. Skips Entra Agent IDs, SPIRE VM startup, join-token generation, sidecar updates, and re-attestation.
+- `--portal-only`: Build and update only `isp-portal` and `securityportal-mock`, then refresh portal auth wiring. Skips Entra Agent IDs, SPIRE VM startup, join-token generation, sidecar updates, and re-attestation.
 - `--no-verify`: Skip the live test suite.
 - `--portal`: Launch the portal after a successful deploy.
 - `REQUIRE_REAL_CA=false`: Explicitly allow fallback CA mode when real Entra custom attribute or CA policy provisioning fails.

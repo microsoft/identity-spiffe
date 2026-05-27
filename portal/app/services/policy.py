@@ -12,7 +12,7 @@ from ..schemas import PolicyConfigCreate
 from ..settings import MGMT_PLANE_AGENT_KEY, PortalSettings
 from ..storage.base import PolicyConfigStore
 
-logger = logging.getLogger("aim-portal.services.policy")
+logger = logging.getLogger("isp-portal.services.policy")
 
 MAX_POLICY_CONFIGS = 50
 MAX_CONFIG_YAML_BYTES = 102_400

@@ -10,7 +10,7 @@ from shared.graph_token import get_graph_token
 
 from ..errors import PortalError
 
-logger = logging.getLogger("aim-portal.clients.graph")
+logger = logging.getLogger("isp-portal.clients.graph")
 
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
@@ -152,7 +152,7 @@ class GraphClient:
             }
         return result
 
-    async def fetch_ca_policies(self, display_name_filter="Identity Research for Agent Management Using SPIFFE:"):
+    async def fetch_ca_policies(self, display_name_filter="Agent Management:"):
         # type: (str) -> List[Dict]
         """Fetch Conditional Access policies from Graph beta API."""
         token = await self.require_token()

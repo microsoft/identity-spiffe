@@ -8,7 +8,7 @@ import httpx
 
 from ..errors import PortalError
 
-logger = logging.getLogger("aim-portal.clients.agents")
+logger = logging.getLogger("isp-portal.clients.agents")
 
 
 class AgentInvokerClient:

@@ -58,7 +58,7 @@ For cloud-only portal changes, prefer:
 ./deploy.sh --portal-only
 ```
 
-That rebuilds and updates `aim-portal` and `securityportal-mock` without restarting agent sidecars or forcing SPIRE re-attestation.
+That rebuilds and updates `isp-portal` and `securityportal-mock` without restarting agent sidecars or forcing SPIRE re-attestation.
 
 ## Operational Notes
 
@@ -67,7 +67,7 @@ That rebuilds and updates `aim-portal` and `securityportal-mock` without restart
 3. `/healthz/live` reports process health, `/healthz/ready` reports dependency readiness, and `/api/system-status` exposes dependency-level status to authenticated users.
 4. `reload-config` is local-only and should not be used as a cloud runtime mechanism.
 5. For new deployments, portal app registrations are env-scoped: `Identity Research for Agent Management Using SPIFFE Portal - Management [<env>]` and `Identity Research for Agent Management Using SPIFFE Portal - Security Portal Mock [<env>]`.
-6. The portal auth groups stay shared tenant-wide: `Identity Research for Agent Management Using SPIFFE Administrators` and `Identity Research for Agent Management Using SPIFFE Viewers`.
+6. The portal auth groups stay shared tenant-wide: `Agent Management Administrators` and `Agent Management Viewers`.
 7. Existing deployments stay on legacy Agent Blueprint naming until explicitly migrated.
 8. `./deploy.sh --portal-only` is the preferred cloud deploy path for portal-only UI/backend changes; do not use it for agent-side or SPIRE-side changes.
 
@@ -132,4 +132,4 @@ The `api()` JS helper retries on 401 by calling `acquireTokenSilent`. If silent 
 - Policy push via the portal uses `Content-Type: application/x-yaml` (raw YAML), not JSON-wrapped.
 - Cloud storage access depends on the portal Container App managed identity having `Storage Blob Data Contributor` on the portal policy store.
 - The UI still accepts legacy `#/demo/...` deep links for backward compatibility, but production behavior is live-only.
-- The portal app registrations are env-scoped for new deployments, while `Identity Research for Agent Management Using SPIFFE Administrators` and `Identity Research for Agent Management Using SPIFFE Viewers` stay shared tenant-wide by design.
+- The portal app registrations are env-scoped for new deployments, while `Agent Management Administrators` and `Agent Management Viewers` stay shared tenant-wide by design.

@@ -11,7 +11,7 @@ import httpx
 
 from .errors import PortalError
 
-logger = logging.getLogger("aim-portal.settings")
+logger = logging.getLogger("isp-portal.settings")
 
 
 TRUST_DOMAIN = "aim.microsoft.com"
@@ -208,8 +208,8 @@ async def load_settings(config_path):
     # type: (str) -> PortalSettings
     runtime_environment = "cloud" if os.getenv("PORTAL_MODE") == "cloud" else "local"
     auth_client_id = os.getenv("AUTH_CLIENT_ID", "")
-    admin_group_id = os.getenv("AIM_ADMIN_GROUP_ID", "")
-    viewer_group_id = os.getenv("AIM_VIEWER_GROUP_ID", "")
+    admin_group_id = os.getenv("ISP_ADMIN_GROUP_ID", "")
+    viewer_group_id = os.getenv("ISP_VIEWER_GROUP_ID", "")
     azure_tenant_id = os.getenv("AZURE_TENANT_ID", "")
     graph_client_id = os.getenv("GRAPH_CLIENT_ID", "") or os.getenv("ENTRA_AGENTID_CLIENT_ID", "")
     graph_client_secret = os.getenv("GRAPH_CLIENT_SECRET", "") or os.getenv("ENTRA_AGENTID_CLIENT_SECRET", "")
@@ -220,8 +220,8 @@ async def load_settings(config_path):
         admin_cp_url = _env_required("ADMIN_CP_URL")
         mgmt_api_key = _env_required("MGMT_API_KEY")
         auth_client_id = _env_required("AUTH_CLIENT_ID")
-        admin_group_id = _env_required("AIM_ADMIN_GROUP_ID")
-        viewer_group_id = _env_required("AIM_VIEWER_GROUP_ID")
+        admin_group_id = _env_required("ISP_ADMIN_GROUP_ID")
+        viewer_group_id = _env_required("ISP_VIEWER_GROUP_ID")
         azure_tenant_id = _env_required("AZURE_TENANT_ID")
         policy_store_provider = os.getenv("POLICY_CONFIG_STORE_PROVIDER", "blob")
         policy_store_account_url = _env_required("POLICY_CONFIG_BLOB_ACCOUNT_URL")

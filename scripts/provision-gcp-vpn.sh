@@ -32,16 +32,16 @@
 # Configuration (env vars with defaults):
 #   GCP_PROJECT          — required, no default
 #   GCP_REGION           — default: us-west1
-#   GCP_VPC_NAME         — default: aim-crosscloud
+#   GCP_VPC_NAME         — default: isp-crosscloud
 #   AZURE_VPN_GATEWAY_IP — required, no default (Azure VPN Gateway public IP)
 #   VPN_SHARED_KEY       — required, no default (IPsec pre-shared key)
 #   AZURE_VNET_CIDR      — default: 10.200.0.0/16
 # Teardown (reverse order):
-#   gcloud compute routes delete aim-route-to-azure --project=$GCP_PROJECT --quiet
-#   gcloud compute vpn-tunnels delete aim-vpn-tunnel-azure --region=$GCP_REGION --project=$GCP_PROJECT --quiet
-#   gcloud compute forwarding-rules delete aim-vpn-udp4500 aim-vpn-udp500 aim-vpn-esp --region=$GCP_REGION --project=$GCP_PROJECT --quiet
-#   gcloud compute target-vpn-gateways delete aim-vpn-gateway --region=$GCP_REGION --project=$GCP_PROJECT --quiet
-#   gcloud compute addresses delete aim-vpn-ip --region=$GCP_REGION --project=$GCP_PROJECT --quiet
+#   gcloud compute routes delete isp-route-to-azure --project=$GCP_PROJECT --quiet
+#   gcloud compute vpn-tunnels delete isp-vpn-tunnel-azure --region=$GCP_REGION --project=$GCP_PROJECT --quiet
+#   gcloud compute forwarding-rules delete isp-vpn-udp4500 isp-vpn-udp500 isp-vpn-esp --region=$GCP_REGION --project=$GCP_PROJECT --quiet
+#   gcloud compute target-vpn-gateways delete isp-vpn-gateway --region=$GCP_REGION --project=$GCP_PROJECT --quiet
+#   gcloud compute addresses delete isp-vpn-ip --region=$GCP_REGION --project=$GCP_PROJECT --quiet
 # =============================================================================
 set -euo pipefail
 
@@ -72,19 +72,19 @@ fi
 
 PROJECT="${GCP_PROJECT}"
 REGION="${GCP_REGION:-us-west1}"
-VPC_NAME="${GCP_VPC_NAME:-aim-crosscloud}"
+VPC_NAME="${GCP_VPC_NAME:-isp-crosscloud}"
 AZURE_PEER_IP="${AZURE_VPN_GATEWAY_IP}"
 SHARED_KEY="${VPN_SHARED_KEY}"
 AZURE_CIDR="${AZURE_VNET_CIDR:-10.200.0.0/16}"
 
 # Resource names
-VPN_IP_NAME="aim-vpn-ip"
-VPN_GW_NAME="aim-vpn-gateway"
-FWD_ESP_NAME="aim-vpn-esp"
-FWD_UDP500_NAME="aim-vpn-udp500"
-FWD_UDP4500_NAME="aim-vpn-udp4500"
-TUNNEL_NAME="aim-vpn-tunnel-azure"
-ROUTE_NAME="aim-route-to-azure"
+VPN_IP_NAME="isp-vpn-ip"
+VPN_GW_NAME="isp-vpn-gateway"
+FWD_ESP_NAME="isp-vpn-esp"
+FWD_UDP500_NAME="isp-vpn-udp500"
+FWD_UDP4500_NAME="isp-vpn-udp4500"
+TUNNEL_NAME="isp-vpn-tunnel-azure"
+ROUTE_NAME="isp-route-to-azure"
 
 # ─── Helper functions ────────────────────────────────────────────────────────
 

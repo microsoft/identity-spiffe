@@ -7,7 +7,7 @@
 #   2. VPN tunnel + gateway + forwarding rules + static IP
 #   3. Firewall rules
 #   4. VPC subnet + network
-#   5. Service account (aim-agent)
+#   5. Service account (isp-agent)
 #
 # Does NOT remove:
 #   - The GCP project itself (may have other resources)
@@ -15,7 +15,7 @@
 #   - Azure-side VPN Gateway (handled by scripts/teardown.sh)
 #
 # Usage:
-#   GCP_PROJECT=aim-crosscloud-poc ./scripts/teardown-google.sh
+#   GCP_PROJECT=isp-crosscloud-poc ./scripts/teardown-google.sh
 #   ./scripts/teardown-google.sh  # reads GCP_PROJECT from azd env
 # =============================================================================
 set -euo pipefail
@@ -41,9 +41,9 @@ PROJECT="${GCP_PROJECT}"
 REGION="${GCP_REGION:-us-west1}"
 ZONE="${REGION}-a"
 VM_NAME="google-budget-reader"
-VPC_NAME="aim-crosscloud"
-SUBNET_NAME="aim-agents"
-SA_NAME="aim-agent"
+VPC_NAME="isp-crosscloud"
+SUBNET_NAME="isp-agents"
+SA_NAME="isp-agent"
 SA_EMAIL="${SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 
 DELETED=()
@@ -102,15 +102,15 @@ echo ""
 
 echo "🔒 Step 2: VPN tunnel"
 delete_resource \
-    "VPN tunnel: aim-vpn-tunnel-azure" \
-    "gcloud compute vpn-tunnels describe aim-vpn-tunnel-azure --region=$REGION --project=$PROJECT" \
-    "gcloud compute vpn-tunnels delete aim-vpn-tunnel-azure --region=$REGION --project=$PROJECT --quiet"
+    "VPN tunnel: isp-vpn-tunnel-azure" \
+    "gcloud compute vpn-tunnels describe isp-vpn-tunnel-azure --region=$REGION --project=$PROJECT" \
+    "gcloud compute vpn-tunnels delete isp-vpn-tunnel-azure --region=$REGION --project=$PROJECT --quiet"
 echo ""
 
 # ─── Step 3: Delete forwarding rules ────────────────────────────────────────
 
 echo "📨 Step 3: VPN forwarding rules"
-for rule in aim-vpn-fr-esp aim-vpn-fr-udp500 aim-vpn-fr-udp4500; do
+for rule in isp-vpn-fr-esp isp-vpn-fr-udp500 isp-vpn-fr-udp4500; do
     delete_resource \
         "Forwarding rule: $rule" \
         "gcloud compute forwarding-rules describe $rule --region=$REGION --project=$PROJECT" \
@@ -122,24 +122,24 @@ echo ""
 
 echo "🌐 Step 4: VPN gateway"
 delete_resource \
-    "Target VPN gateway: aim-vpn-gateway" \
-    "gcloud compute target-vpn-gateways describe aim-vpn-gateway --region=$REGION --project=$PROJECT" \
-    "gcloud compute target-vpn-gateways delete aim-vpn-gateway --region=$REGION --project=$PROJECT --quiet"
+    "Target VPN gateway: isp-vpn-gateway" \
+    "gcloud compute target-vpn-gateways describe isp-vpn-gateway --region=$REGION --project=$PROJECT" \
+    "gcloud compute target-vpn-gateways delete isp-vpn-gateway --region=$REGION --project=$PROJECT --quiet"
 echo ""
 
 # ─── Step 5: Delete static IP ───────────────────────────────────────────────
 
 echo "🔢 Step 5: VPN static IP"
 delete_resource \
-    "Static IP: aim-vpn-ip" \
-    "gcloud compute addresses describe aim-vpn-ip --region=$REGION --project=$PROJECT" \
-    "gcloud compute addresses delete aim-vpn-ip --region=$REGION --project=$PROJECT --quiet"
+    "Static IP: isp-vpn-ip" \
+    "gcloud compute addresses describe isp-vpn-ip --region=$REGION --project=$PROJECT" \
+    "gcloud compute addresses delete isp-vpn-ip --region=$REGION --project=$PROJECT --quiet"
 echo ""
 
 # ─── Step 6: Delete firewall rules ──────────────────────────────────────────
 
 echo "🔥 Step 6: Firewall rules"
-for rule in aim-allow-ssh aim-allow-https aim-allow-spire aim-allow-agent-http; do
+for rule in isp-allow-ssh isp-allow-https isp-allow-spire isp-allow-agent-http; do
     delete_resource \
         "Firewall: $rule" \
         "gcloud compute firewall-rules describe $rule --project=$PROJECT" \

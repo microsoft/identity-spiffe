@@ -70,8 +70,8 @@ async def startup_config():
 # ---------------------------------------------------------------------------
 
 AUTH_CLIENT_ID = os.getenv("AUTH_CLIENT_ID", "")
-AIM_ADMIN_GROUP_ID = os.getenv("AIM_ADMIN_GROUP_ID", "")
-AIM_VIEWER_GROUP_ID = os.getenv("AIM_VIEWER_GROUP_ID", "")
+ISP_ADMIN_GROUP_ID = os.getenv("ISP_ADMIN_GROUP_ID", "")
+ISP_VIEWER_GROUP_ID = os.getenv("ISP_VIEWER_GROUP_ID", "")
 _jwt_validator = None  # type: Optional[EntraJWTValidator]
 
 _PUBLIC_PATHS = {"/api/auth-config", "/api/health", "/health", "/", "/favicon.ico",
@@ -91,8 +91,8 @@ def _init_securityportal_auth():
     _jwt_validator = EntraJWTValidator(
         tenant_id=tenant_id,
         client_id=AUTH_CLIENT_ID,
-        admin_group_id=AIM_ADMIN_GROUP_ID,
-        viewer_group_id=AIM_VIEWER_GROUP_ID,
+        admin_group_id=ISP_ADMIN_GROUP_ID,
+        viewer_group_id=ISP_VIEWER_GROUP_ID,
     )
     logger.info("Entra JWT auth enabled (client_id=%s)", AUTH_CLIENT_ID)
 
@@ -111,8 +111,8 @@ async def get_auth_config():
         "auth_required": bool(AUTH_CLIENT_ID),
         "client_id": AUTH_CLIENT_ID,
         "authority": "https://login.microsoftonline.com/%s" % tenant_id if tenant_id else "",
-        "admin_group_id": AIM_ADMIN_GROUP_ID,
-        "viewer_group_id": AIM_VIEWER_GROUP_ID,
+        "admin_group_id": ISP_ADMIN_GROUP_ID,
+        "viewer_group_id": ISP_VIEWER_GROUP_ID,
     }
 
 

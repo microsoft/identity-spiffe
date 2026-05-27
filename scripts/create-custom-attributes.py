@@ -48,7 +48,7 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 GRAPH_BETA = "https://graph.microsoft.com/beta"
 
 ATTRIBUTE_SET_ID = "AgentIdentity"
-ATTRIBUTE_SET_DESCRIPTION = "Custom security attributes for Identity Research for Agent Management Using SPIFFE agent identity governance"
+ATTRIBUTE_SET_DESCRIPTION = "Custom security attributes for Agent Management agent identity governance"
 ATTRIBUTE_NAME = "Department"
 ATTRIBUTE_DESCRIPTION = "Department the agent is authorized for"
 ALLOWED_VALUES = ["Finance", "HR", "IT", "Operations"]
@@ -64,8 +64,8 @@ AGENT_TAGS = {
 
 # The CA schema/policy stays shared tenant-wide. Parallel environment isolation
 # comes from env-scoped Agent Identity service principals, not per-env CA names.
-CA_POLICY_NAME = "Identity Research for Agent Management Using SPIFFE: Block agents based on risk"
-OLD_CA_POLICY_NAME = "Identity Research for Agent Management Using SPIFFE: Block non-Finance agents from Budget Backend"
+CA_POLICY_NAME = "Agent Management: Block agents based on risk"
+OLD_CA_POLICY_NAME = "Identity Research for Agent Management Using SPIFFE: Block agents based on risk"
 ATTRIBUTE_DEFINITION_ID = f"{ATTRIBUTE_SET_ID}_{ATTRIBUTE_NAME}"
 
 

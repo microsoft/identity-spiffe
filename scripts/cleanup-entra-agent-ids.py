@@ -33,7 +33,7 @@ from entra_scope import (  # noqa: E402
 )
 
 GRAPH_BASE = "https://graph.microsoft.com/beta"
-BLUEPRINT_PREFIX = "Identity Research for Agent Management Using SPIFFE Budget Backend Agents"
+BLUEPRINT_PREFIX = "Agent Management Budget Backend Agents"
 
 AGENTS = [
     "budget-report",
@@ -142,13 +142,13 @@ def find_blueprint_applications(token, scope, all_envs=False):
 
 def derive_sp_name_from_fic_name(fic_display_name, scope):
     if scope.mode == "scoped":
-        prefix = f"aim-fic-{scope.scope_key}-"
+        prefix = f"isp-fic-{scope.scope_key}-"
         if fic_display_name.startswith(prefix):
-            return f"aim-{scope.scope_key}-{fic_display_name[len(prefix):]}"
+            return f"isp-{scope.scope_key}-{fic_display_name[len(prefix):]}"
     else:
-        prefix = "aim-fic-"
+        prefix = "isp-fic-"
         if fic_display_name.startswith(prefix):
-            return f"aim-{fic_display_name[len(prefix):]}"
+            return f"isp-{fic_display_name[len(prefix):]}"
     return None
 
 
@@ -185,7 +185,7 @@ def find_target_service_principals(token, scope, all_envs=False, blueprint_apps=
     if all_envs:
         resp = graph_request(
             "GET",
-            "/servicePrincipals?$filter=startswith(displayName,'aim-')",
+            "/servicePrincipals?$filter=startswith(displayName,'isp-')",
             token,
         )
         if resp.status_code == 200:
@@ -194,7 +194,7 @@ def find_target_service_principals(token, scope, all_envs=False, blueprint_apps=
         return list(targets.values())
 
     if scope.mode == "scoped":
-        prefix = f"aim-{scope.scope_key}-"
+        prefix = f"isp-{scope.scope_key}-"
         resp = graph_request(
             "GET",
             f"/servicePrincipals?$filter=startswith(displayName,'{odata_escape(prefix)}')",
@@ -308,7 +308,7 @@ def verify_cleanup(token, scope, all_envs=False):
     if all_envs:
         resp = graph_request(
             "GET",
-            "/servicePrincipals?$filter=startswith(displayName,'aim-')",
+            "/servicePrincipals?$filter=startswith(displayName,'isp-')",
             token,
         )
         if resp.status_code == 200 and resp.json().get("value"):
@@ -351,12 +351,12 @@ def verify_cleanup(token, scope, all_envs=False):
 
 def print_preflight(scope, all_envs=False):
     print("\nScope preflight:")
-    print(f"  AIM_ENV_SCOPE_MODE: {scope.mode} ({scope.mode_source})")
-    print(f"  AIM_ENV_SCOPE_KEY:  {scope.scope_key} ({scope.key_source})")
+    print(f"  ISP_ENV_SCOPE_MODE: {scope.mode} ({scope.mode_source})")
+    print(f"  ISP_ENV_SCOPE_KEY:  {scope.scope_key} ({scope.key_source})")
     if all_envs:
         print("  Target: ALL Identity Research for Agent Management Using SPIFFE Agent Identity objects across all environments")
         print(f"  Blueprints: displayName startswith '{BLUEPRINT_PREFIX}'")
-        print("  Service principals: displayName startswith 'aim-'")
+        print("  Service principals: displayName startswith 'isp-'")
         return
 
     print(f"  Blueprint:          {blueprint_display_name(scope)}")

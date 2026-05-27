@@ -97,7 +97,7 @@ discover_endpoints() {
   # Fallback: try az CLI directly
   if [[ -z "$RESOURCE_GROUP" ]]; then
     info "No azd env found. Trying az CLI resource group discovery..."
-    RESOURCE_GROUP=$(az group list --query "[?starts_with(name,'aim-') || starts_with(name,'rg-aim')].name" -o tsv 2>/dev/null | head -1 || true)
+    RESOURCE_GROUP=$(az group list --query "[?starts_with(name,'isp-') || starts_with(name,'rg-isp-') || starts_with(name,'rg-identity-spiffe')].name" -o tsv 2>/dev/null | head -1 || true)
   fi
 
   if [[ -z "$RESOURCE_GROUP" ]]; then
@@ -173,7 +173,7 @@ discover_endpoints() {
   header "Step 3: Discovering SPIRE Server VM"
   SPIRE_VM_IP=$(az vm list-ip-addresses \
     --resource-group "$RESOURCE_GROUP" \
-    --query "[?starts_with(virtualMachine.name,'aim-spire') || starts_with(virtualMachine.name,'spire')].virtualMachine.network.publicIpAddresses[0].ipAddress" \
+    --query "[?starts_with(virtualMachine.name,'isp-spire') || starts_with(virtualMachine.name,'spire')].virtualMachine.network.publicIpAddresses[0].ipAddress" \
     -o tsv 2>/dev/null | head -1 || true)
 
   if [[ -n "$SPIRE_VM_IP" ]]; then

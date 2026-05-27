@@ -138,7 +138,7 @@ async def get_ca_sample(request: Request, _user=Depends(viewer_or_admin)):
             "displayName": "Require compliant device for Budget agents",
             "state": "enabledForReportingButNotEnforced",
             "conditions": {
-                "applications": {"includeApplications": ["api://aim-budget-backend"]},
+                "applications": {"includeApplications": ["api://isp-budget-backend"]},
                 "users": {"includeUsers": [agent.entra_agent_id or "N/A" for agent in agents.values()]},
             },
             "grantControls": {"operator": "OR", "builtInControls": ["compliantDevice"]},

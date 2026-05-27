@@ -23,13 +23,13 @@ from .routers.api import router as api_router
 from .routers.public import router as public_router
 from .version import get_portal_version
 
-logger = logging.getLogger("aim-portal")
+logger = logging.getLogger("isp-portal")
 
 
 def create_app(config_path="portal-config.json"):
     # type: (str) -> FastAPI
     configure_logging()
-    configure_observability("aim-portal")
+    configure_observability("isp-portal")
 
     @asynccontextmanager
     async def lifespan(app):
@@ -50,7 +50,7 @@ def create_app(config_path="portal-config.json"):
             await http_client.aclose()
 
     app = FastAPI(
-        title="Identity Research for Agent Management Using SPIFFE Control Panel",
+        title="Agent Management Control Panel",
         version=get_portal_version(),
         lifespan=lifespan,
     )

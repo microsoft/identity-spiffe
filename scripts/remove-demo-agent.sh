@@ -42,7 +42,7 @@ AZD_ENV=$(azd_env_load)
 RG=$(azd_env_get_from_blob "$AZD_ENV" "AZURE_RESOURCE_GROUP")
 ENTRA_BP_OID=$(azd_env_get_from_blob "$AZD_ENV" "ENTRA_BLUEPRINT_OBJECT_ID")
 if [ -z "$RG" ]; then
-    RG=$(az group list --query "[?starts_with(name,'aim-') || starts_with(name,'rg-aim')].name" -o tsv 2>/dev/null | head -1 || true)
+    RG=$(az group list --query "[?starts_with(name,'isp-') || starts_with(name,'rg-isp-') || starts_with(name,'rg-identity-spiffe')].name" -o tsv 2>/dev/null | head -1 || true)
 fi
 
 if [ -z "$RG" ]; then

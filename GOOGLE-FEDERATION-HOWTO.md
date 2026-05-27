@@ -57,7 +57,7 @@ For an existing environment where Azure is already deployed:
 The `--google` flag appends the cross-cloud flow after the standard Azure deployment:
 
 1. **Azure infra + agents deploy** (~10 min) — VNet, ACA environment, SPIRE server, agent containers
-2. **GCP project bootstrap** — enables Compute, IAM, and networking APIs; creates the `aim-agent` service account
+2. **GCP project bootstrap** — enables Compute, IAM, and networking APIs; creates the `isp-agent` service account
 3. **GCE VM provisioned** — Ubuntu 22.04 with Docker, SPIRE agent, `spiffe-proxy`, and `demo-agent`
 4. **VPN Gateway deployed** (~30 min) — Azure VpnGw1 with IPsec; the script shows progress while waiting
 5. **GCP VPN tunnel established** — Classic Cloud VPN, forwarding rules, route to Azure VNet CIDR
@@ -77,7 +77,7 @@ The `--google` flag appends the cross-cloud flow after the standard Azure deploy
 |---|---|
 | VNet (`10.200.0.0/16`) + ACA environment | VPC + subnet |
 | VPN Gateway (VpnGw1) + IPsec connection | Cloud VPN tunnel + static IP |
-| Entra Agent Identity + Blueprint FIC | `aim-agent` service account |
+| Entra Agent Identity + Blueprint FIC | `isp-agent` service account |
 | `federated_policies` RBAC entry | SPIRE server + agent |
 | mTLS allow list entry | `spiffe-proxy` + `demo-agent` containers |
 
@@ -147,17 +147,17 @@ For the full architecture, see [`docs/architecture/next-google-cloud-agent-feder
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `AADSTS700213: No matching federated identity record` | GCE VM using the wrong service account (default compute SA instead of `aim-agent`) | Check: `gcloud compute instances describe <vm> --format 'get(serviceAccounts[0].email)'`. Fix: `gcloud compute instances set-service-account <vm> --service-account aim-agent@<project>.iam.gserviceaccount.com` |
+| `AADSTS700213: No matching federated identity record` | GCE VM using the wrong service account (default compute SA instead of `isp-agent`) | Check: `gcloud compute instances describe <vm> --format 'get(serviceAccounts[0].email)'`. Fix: `gcloud compute instances set-service-account <vm> --service-account isp-agent@<project>.iam.gserviceaccount.com` |
 | `AADSTS70021: No matching FIC subject` | FIC subject is the SA email instead of the numeric ID | Get the numeric ID: `gcloud iam service-accounts describe <email> --format 'value(uniqueId)'`. Delete and recreate the FIC with this value. |
 | `certificate signed by unknown authority` (mTLS) | SPIRE trust bundles not exchanged, or expired after a redeploy | Re-run `./deploy.sh --google` — bundle exchange is idempotent |
 | `tls: bad certificate` | `budget-backend` SPIRE entry missing `federatesWith gcp.aim.microsoft.com` | Re-run `./deploy.sh --google` — fixes the entry automatically |
 | `insufficient_roles` (403) | `Budget.Read` app role not assigned to the Google Agent Identity | Re-run `scripts/add-google-agent.sh` — now includes role assignment |
-| VPN tunnel stuck at `FIRST_HANDSHAKE` | Azure Local Network Gateway pointing at the GCE VM IP instead of the GCP VPN Gateway IP | Check: `gcloud compute addresses describe aim-vpn-ip --region <region>` — use this static IP, not the VM's ephemeral IP |
+| VPN tunnel stuck at `FIRST_HANDSHAKE` | Azure Local Network Gateway pointing at the GCE VM IP instead of the GCP VPN Gateway IP | Check: `gcloud compute addresses describe isp-vpn-ip --region <region>` — use this static IP, not the VM's ephemeral IP |
 | Deploy hangs at SPIRE VM step | Guest agent overwhelmed by rapid `run-command` calls | Already fixed with 10 s cooldown between commands. Kill the script and re-run. |
 | Portal shows "Sync failed" | Graph secrets empty on portal container after a fresh deploy | Re-run `./deploy.sh --portal-only` |
 | Portal shows "Caller URL not configured" for Google agent | External agent store missing `invoke_url` | Re-run `scripts/add-google-agent.sh --invoke-url http://<GCE-IP>:8000` |
 | `AADSTS70011` or scope error at Hop 1 | `ENTRA_OAUTH2_AUDIENCE` set to Agent Identity client ID instead of Blueprint client ID | Check env vars on GCE — `ENTRA_OAUTH2_AUDIENCE` must be the Blueprint `client_id` |
-| `token_acquisition_failed` with no upstream details | GCE metadata server unreachable or service account not attached | Verify the VM is on GCE and the `aim-agent` SA is attached: `curl -H "Metadata-Flavor: Google" http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/email` |
+| `token_acquisition_failed` with no upstream details | GCE metadata server unreachable or service account not attached | Verify the VM is on GCE and the `isp-agent` SA is attached: `curl -H "Metadata-Flavor: Google" http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/email` |
 
 ---
 
@@ -206,7 +206,7 @@ Runs 6 checks: SSH preflight, tool availability, VPN status (both sides), TCP to
 
 ```bash
 ./scripts/add-google-agent.sh \
-  --gcp-sa aim-agent@my-project.iam.gserviceaccount.com \
+  --gcp-sa isp-agent@my-project.iam.gserviceaccount.com \
   --invoke-url http://<gce-ip>:8000 \
   --name google-budget-reader
 ```

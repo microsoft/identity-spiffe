@@ -193,7 +193,7 @@ On 2026-03-27, we needed to reconfigure the SPIRE server Docker container to use
 
 **Fix:** `./scripts/reattest.sh admin-control-plane` (~30s). Generates a fresh join token and updates just the `JOIN_TOKEN` env var. For agent code changes, use `./deploy.sh --skip-provision` (rebuilds + re-attests all agents).
 
-**Rule:** NEVER use `azd deploy` for agent Container Apps. Only safe for portals (`aim-portal`, `securityportal-mock`) which have no SPIFFE sidecar.
+**Rule:** NEVER use `azd deploy` for agent Container Apps. Only safe for portals (`isp-portal`, `securityportal-mock`) which have no SPIFFE sidecar.
 
 ## 27. Agent Discovery Must Be Dynamic — Never Hardcode URLs or Use Static Env Vars
 
@@ -259,7 +259,7 @@ For SPIFFE federation scenarios where the SPIRE Agent runs as a separate process
 
 ## 34. Rapid-Fire Run-Commands Wedge the Guest Agent on Fresh VMs
 
-On 2026-04-03, `deploy.sh --new` for the `aim-crosscloud` environment stalled at Step 4 (SPIRE server configuration). The SPIRE server Docker container was running and healthy, but the deploy hung indefinitely.
+On 2026-04-03, `deploy.sh --new` for the `isp-crosscloud` environment stalled at Step 4 (SPIRE server configuration). The SPIRE server Docker container was running and healthy, but the deploy hung indefinitely.
 
 **Root cause:** `deploy.sh` fires 8-10 `az vm run-command create` calls in rapid succession (SPIRE start → trust bundle extract → 5x token generate → 5x entry create). Each call goes through the create → poll → provisioningState wait → delete cycle. On a fresh B1s VM where the guest agent (`waagent`) has just finished cloud-init, the agent cannot process the delete cleanup before the next create arrives. The RunCommandHandler extension enters a confused state where commands execute successfully on the guest but return empty output to ARM, or the ARM resource gets stuck in a transitional `provisioningState`.
 

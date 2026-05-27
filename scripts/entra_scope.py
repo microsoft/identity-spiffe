@@ -22,13 +22,13 @@ SCOPE_MODE_LEGACY = "legacy"
 SCOPE_MODE_SCOPED = "scoped"
 VALID_SCOPE_MODES = {SCOPE_MODE_LEGACY, SCOPE_MODE_SCOPED}
 
-LEGACY_BLUEPRINT_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Budget Backend Agents"
-LEGACY_PORTAL_MANAGEMENT_APP_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Portal - Management"
-LEGACY_PORTAL_SECURITYPORTAL_APP_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Portal - Security Portal Mock"
-LEGACY_PORTAL_ADMIN_GROUP_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Administrators"
-LEGACY_PORTAL_VIEWER_GROUP_DISPLAY_NAME = "Identity Research for Agent Management Using SPIFFE Viewers"
-LEGACY_PORTAL_ADMIN_GROUP_MAIL_NICKNAME = "aim-administrators"
-LEGACY_PORTAL_VIEWER_GROUP_MAIL_NICKNAME = "aim-viewers"
+LEGACY_BLUEPRINT_DISPLAY_NAME = "Agent Management Budget Backend Agents"
+LEGACY_PORTAL_MANAGEMENT_APP_DISPLAY_NAME = "Agent Management Portal - Management"
+LEGACY_PORTAL_SECURITYPORTAL_APP_DISPLAY_NAME = "Agent Management Portal - Security Portal Mock"
+LEGACY_PORTAL_ADMIN_GROUP_DISPLAY_NAME = "Agent Management Administrators"
+LEGACY_PORTAL_VIEWER_GROUP_DISPLAY_NAME = "Agent Management Viewers"
+LEGACY_PORTAL_ADMIN_GROUP_MAIL_NICKNAME = "isp-administrators"
+LEGACY_PORTAL_VIEWER_GROUP_MAIL_NICKNAME = "isp-viewers"
 
 SCOPE_MODE_SENTINEL_KEYS = (
     "ENTRA_BLUEPRINT_OBJECT_ID",
@@ -55,7 +55,7 @@ def _normalize_mode(raw_mode: str | None) -> str | None:
     mode = raw_mode.strip().lower()
     if mode not in VALID_SCOPE_MODES:
         raise ScopeResolutionError(
-            f"Unsupported AIM_ENV_SCOPE_MODE '{raw_mode}'. Expected one of: "
+            f"Unsupported ISP_ENV_SCOPE_MODE '{raw_mode}'. Expected one of: "
             f"{', '.join(sorted(VALID_SCOPE_MODES))}."
         )
     return mode
@@ -114,7 +114,7 @@ def resolve_scope_mode_with_source(
     environ: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     getter = _build_getter(env_get=env_get, environ=environ)
-    explicit = _normalize_mode(getter("AIM_ENV_SCOPE_MODE"))
+    explicit = _normalize_mode(getter("ISP_ENV_SCOPE_MODE"))
     if explicit:
         return explicit, "explicit"
 
@@ -126,7 +126,7 @@ def resolve_scope_mode_with_source(
             source = "auto-legacy"
             break
 
-    _persist_value("AIM_ENV_SCOPE_MODE", mode, env_set=env_set, environ=environ)
+    _persist_value("ISP_ENV_SCOPE_MODE", mode, env_set=env_set, environ=environ)
     return mode, source
 
 
@@ -152,21 +152,21 @@ def resolve_scope_key_with_source(
     environ: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     getter = _build_getter(env_get=env_get, environ=environ)
-    raw_key = getter("AIM_ENV_SCOPE_KEY")
+    raw_key = getter("ISP_ENV_SCOPE_KEY")
     if raw_key:
         scope_key = sanitize_scope_key(raw_key)
         if not scope_key:
             raise ScopeResolutionError(
-                f"AIM_ENV_SCOPE_KEY '{raw_key}' does not produce a valid scope key."
+                f"ISP_ENV_SCOPE_KEY '{raw_key}' does not produce a valid scope key."
             )
         if scope_key != raw_key:
-            _persist_value("AIM_ENV_SCOPE_KEY", scope_key, env_set=env_set, environ=environ)
+            _persist_value("ISP_ENV_SCOPE_KEY", scope_key, env_set=env_set, environ=environ)
         return scope_key, "explicit"
 
     resolved_env_name = env_name or getter("AZURE_ENV_NAME")
     if not resolved_env_name:
         raise ScopeResolutionError(
-            "AZURE_ENV_NAME is required to resolve AIM_ENV_SCOPE_KEY."
+            "AZURE_ENV_NAME is required to resolve ISP_ENV_SCOPE_KEY."
         )
 
     scope_key = sanitize_scope_key(resolved_env_name)
@@ -174,7 +174,7 @@ def resolve_scope_key_with_source(
         raise ScopeResolutionError(
             f"AZURE_ENV_NAME '{resolved_env_name}' does not produce a valid scope key."
         )
-    _persist_value("AIM_ENV_SCOPE_KEY", scope_key, env_set=env_set, environ=environ)
+    _persist_value("ISP_ENV_SCOPE_KEY", scope_key, env_set=env_set, environ=environ)
     return scope_key, "derived"
 
 
@@ -217,21 +217,21 @@ def blueprint_display_name(scope: EntraScope) -> str:
 
 def agent_identity_display_name(agent_name: str, scope: EntraScope) -> str:
     if scope.mode == SCOPE_MODE_LEGACY:
-        return f"aim-{agent_name}"
-    # Avoid aim-aim-* when scope_key already starts with aim-
+        return f"isp-{agent_name}"
+    # Avoid isp-isp-* when scope_key already starts with isp-
     key = scope.scope_key
-    if key.startswith("aim-"):
+    if key.startswith("isp-"):
         return f"{key}-{agent_name}"
-    return f"aim-{key}-{agent_name}"
+    return f"isp-{key}-{agent_name}"
 
 
 def fic_name(agent_name: str, scope: EntraScope) -> str:
     if scope.mode == SCOPE_MODE_LEGACY:
-        return f"aim-fic-{agent_name}"
+        return f"isp-fic-{agent_name}"
     key = scope.scope_key
-    if key.startswith("aim-"):
-        return f"aim-fic-{key[4:]}-{agent_name}"
-    return f"aim-fic-{key}-{agent_name}"
+    if key.startswith("isp-"):
+        return f"isp-fic-{key[4:]}-{agent_name}"
+    return f"isp-fic-{key}-{agent_name}"
 
 
 def portal_management_app_display_name(scope: EntraScope) -> str:
@@ -271,11 +271,11 @@ def validate_group_mail_nickname(mail_nickname: str) -> None:
 
 def summary_values(scope: EntraScope) -> dict[str, str]:
     values = {
-        "AIM_ENV_SCOPE_MODE": scope.mode,
-        "AIM_ENV_SCOPE_MODE_SOURCE": scope.mode_source,
-        "AIM_ENV_SCOPE_KEY": scope.scope_key,
-        "AIM_ENV_SCOPE_KEY_SOURCE": scope.key_source,
-        "AIM_ENV_SCOPE_ENV_NAME": scope.env_name,
+        "ISP_ENV_SCOPE_MODE": scope.mode,
+        "ISP_ENV_SCOPE_MODE_SOURCE": scope.mode_source,
+        "ISP_ENV_SCOPE_KEY": scope.scope_key,
+        "ISP_ENV_SCOPE_KEY_SOURCE": scope.key_source,
+        "ISP_ENV_SCOPE_ENV_NAME": scope.env_name,
         "ENTRA_SCOPE_BLUEPRINT_DISPLAY_NAME": blueprint_display_name(scope),
         "ENTRA_SCOPE_PORTAL_MANAGEMENT_APP_DISPLAY_NAME": portal_management_app_display_name(scope),
         "ENTRA_SCOPE_PORTAL_SECURITYPORTAL_APP_DISPLAY_NAME": portal_securityportal_app_display_name(scope),

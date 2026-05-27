@@ -23,12 +23,12 @@ entra_scope_init() {
 
 resolve_scope_mode() {
     entra_scope_init >/dev/null || return 1
-    printf '%s\n' "${AIM_ENV_SCOPE_MODE}"
+    printf '%s\n' "${ISP_ENV_SCOPE_MODE}"
 }
 
 resolve_scope_key() {
     entra_scope_init >/dev/null || return 1
-    printf '%s\n' "${AIM_ENV_SCOPE_KEY}"
+    printf '%s\n' "${ISP_ENV_SCOPE_KEY}"
 }
 
 blueprint_display_name() {
@@ -78,7 +78,7 @@ portal_viewer_group_mail_nickname() {
 
 validate_entra_scope() {
     entra_scope_init >/dev/null || return 1
-    if [ "${AIM_ENV_SCOPE_MODE}" = "scoped" ] && [ -z "${AIM_ENV_SCOPE_ENV_NAME:-}" ]; then
+    if [ "${ISP_ENV_SCOPE_MODE}" = "scoped" ] && [ -z "${ISP_ENV_SCOPE_ENV_NAME:-}" ]; then
         echo "ERROR: Scoped Entra naming requires AZURE_ENV_NAME." >&2
         return 1
     fi
@@ -95,8 +95,8 @@ validate_entra_scope() {
 print_entra_scope_summary() {
     entra_scope_init >/dev/null || return 1
     local calling_agents=("budget-report" "budget-approval" "employee-menus")
-    echo "   AIM_ENV_SCOPE_MODE: ${AIM_ENV_SCOPE_MODE} (${AIM_ENV_SCOPE_MODE_SOURCE})"
-    echo "   AIM_ENV_SCOPE_KEY: ${AIM_ENV_SCOPE_KEY} (${AIM_ENV_SCOPE_KEY_SOURCE})"
+    echo "   ISP_ENV_SCOPE_MODE: ${ISP_ENV_SCOPE_MODE} (${ISP_ENV_SCOPE_MODE_SOURCE})"
+    echo "   ISP_ENV_SCOPE_KEY: ${ISP_ENV_SCOPE_KEY} (${ISP_ENV_SCOPE_KEY_SOURCE})"
     echo "   Blueprint: ${ENTRA_SCOPE_BLUEPRINT_DISPLAY_NAME}"
     local agent
     for agent in "$@"; do

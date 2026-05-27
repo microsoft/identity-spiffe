@@ -9,7 +9,7 @@ import httpx
 
 from ..errors import PortalError
 
-logger = logging.getLogger("aim-portal.clients.admin")
+logger = logging.getLogger("isp-portal.clients.admin")
 
 
 class AdminControlPlaneClient:

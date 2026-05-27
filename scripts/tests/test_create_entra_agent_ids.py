@@ -51,7 +51,7 @@ class CreateEntraAgentIdsTests(unittest.TestCase):
         with patch.object(self.module, "graph_request", side_effect=fake_graph_request):
             existing = self.module.find_existing_agent_identity(
                 "token",
-                "aim-aim-bc4d-budget-report",
+                "isp-isp-bc4d-budget-report",
                 stored_app_id="stored-app",
             )
 
@@ -62,8 +62,8 @@ class CreateEntraAgentIdsTests(unittest.TestCase):
     def test_create_agent_identities_uses_scoped_display_names(self):
         scoped = EntraScope(
             mode="scoped",
-            env_name="aim-bc4d",
-            scope_key="aim-bc4d",
+            env_name="isp-bc4d",
+            scope_key="isp-bc4d",
             mode_source="explicit",
             key_source="explicit",
         )
@@ -80,18 +80,18 @@ class CreateEntraAgentIdsTests(unittest.TestCase):
                 with patch.object(self.module, "set_azd_env", side_effect=lambda key, value: stored_pairs.append((key, value))):
                     self.module.create_agent_identities("token", "blueprint-app-id")
 
-        self.assertIn("aim-bc4d-budget-report", seen_display_names)
-        self.assertIn("aim-bc4d-admin-control-plane", seen_display_names)
+        self.assertIn("isp-bc4d-budget-report", seen_display_names)
+        self.assertIn("isp-bc4d-admin-control-plane", seen_display_names)
         self.assertIn(
-            ("ENTRA_AGENT_ID_BUDGET_REPORT", "app-for-aim-bc4d-budget-report"),
+            ("ENTRA_AGENT_ID_BUDGET_REPORT", "app-for-isp-bc4d-budget-report"),
             stored_pairs,
         )
 
     def test_scoped_fic_repair_only_deletes_scoped_name(self):
         scoped = EntraScope(
             mode="scoped",
-            env_name="aim-bc4d",
-            scope_key="aim-bc4d",
+            env_name="isp-bc4d",
+            scope_key="isp-bc4d",
             mode_source="explicit",
             key_source="explicit",
         )
@@ -117,12 +117,12 @@ class CreateEntraAgentIdsTests(unittest.TestCase):
                         "value": [
                             {
                                 "id": "scoped-fic-id",
-                                "name": "aim-fic-bc4d-budget-report",
+                                "name": "isp-fic-bc4d-budget-report",
                                 "subject": "stale-principal",
                             },
                             {
                                 "id": "legacy-fic-id",
-                                "name": "aim-fic-budget-report",
+                                "name": "isp-fic-budget-report",
                                 "subject": "legacy-principal",
                             },
                         ]
@@ -137,7 +137,7 @@ class CreateEntraAgentIdsTests(unittest.TestCase):
 
         env_values = {
             "AZURE_TENANT_ID": "tenant-id",
-            "AZURE_ENV_NAME": "aim-bc4d",
+            "AZURE_ENV_NAME": "isp-bc4d",
             "AZURE_RESOURCE_GROUP": "rg-example",
             "ENTRA_BLUEPRINT_APP_ID": "blueprint-app-id",
             "ENTRA_BLUEPRINT_OBJECT_ID": "blueprint-obj-id",
