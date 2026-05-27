@@ -140,8 +140,8 @@ az login
 azd auth login
 azd env new isp-example
 
-# Azure-only environment
-./deploy.sh --new
+# Azure-only environment (seed the portal admin with the identity you'll sign in as)
+./deploy.sh --new --with-admin=you@your-tenant.com
 
 # Existing environment, code changes only
 ./deploy.sh --skip-provision
@@ -150,6 +150,13 @@ azd env new isp-example
 ./deploy.sh --new --google
 ./deploy.sh --new --github
 ```
+
+> **Portal sign-in tip.** `deploy.sh` only adds the signed-in `az login` user
+> to the `Agent Management Administrators` group by default. If you'll sign
+> into the portal with a different identity, pass `--with-admin=<upn>`
+> (repeatable) or set `ISP_INITIAL_ADMINS=alice@contoso.com,bob@contoso.com`.
+> Use `./scripts/portal-members.sh add-admin <upn>` to add more admins (or
+> `add-viewer`, `remove-admin`, `list`) after deploy.
 
 Important deployment rules:
 

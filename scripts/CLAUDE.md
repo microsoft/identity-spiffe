@@ -27,6 +27,7 @@ Read alongside:
 | `reattest.sh` | Bash | ~110 | Re-attest agents with fresh join tokens. **Run this EVERY TIME a Container App revision is created/restarted.** Lightweight fix — no rebuild, no Entra changes, just fresh tokens (~30s per agent). Usage: `./scripts/reattest.sh` (all) or `./scripts/reattest.sh admin-control-plane` (one) |
 | `add-demo-agent.sh` | Bash | ~350 | Dynamically add a demo agent to running deployment |
 | `remove-demo-agent.sh` | Bash | ~130 | Remove a dynamically-added demo agent |
+| `portal-members.sh` | Bash | small | Add/remove/list members of the portal Administrators/Viewers groups post-deploy. Usage: `./scripts/portal-members.sh add-admin <upn>` |
 | `teardown.sh` | Bash | ~80 | Clean teardown of all resources |
 
 ---

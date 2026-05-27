@@ -37,7 +37,24 @@ Use a full deploy when anything below changes:
 - infrastructure under `infra/`
 
 ```bash
-./deploy.sh --new
+./deploy.sh --new --with-admin=you@your-tenant.com
+```
+
+> **Seed the portal admin.** By default `deploy.sh` only adds the signed-in
+> `az login` user to the `Agent Management Administrators` group. If you sign
+> into the portal with a different identity, sign-in will fail with an
+> *"Access Denied — not in the Administrators or Viewers group"* error.
+> Pass `--with-admin=<upn>` (repeatable) — or set the
+> `ISP_INITIAL_ADMINS=alice@contoso.com,bob@contoso.com` env var — to seed
+> additional admins during deploy. The value can be a UPN/email or an Entra
+> object ID; users must already exist in the tenant.
+
+To add admins/viewers after deploy, use:
+
+```bash
+./scripts/portal-members.sh add-admin alice@contoso.com
+./scripts/portal-members.sh add-viewer bob@contoso.com
+./scripts/portal-members.sh list
 ```
 
 Use `--reuse=<resource-group>` only when you intentionally want to deploy into an existing resource group.

@@ -25,6 +25,7 @@
 #
 # Usage:
 #   ./deploy.sh                              # Full deploy from scratch
+#   ./deploy.sh --new --with-admin=alice@contoso.com  # Seed initial portal admin
 #   ./deploy.sh --skip-provision             # Rebuild image + redeploy
 #   ./deploy.sh --skip-provision --skip-build # Re-attest only (fresh tokens)
 #   ./deploy.sh --portal-only                # Rebuild/update portal apps only (no re-attestation)
@@ -32,6 +33,7 @@
 #   ./deploy.sh --no-verify                  # Skip post-deploy validation
 #   ./deploy.sh --portal                     # Launch portal after success
 #   REQUIRE_REAL_CA=false ./deploy.sh        # Allow YAML fallback if Entra CA fails
+#   ISP_INITIAL_ADMINS=alice@contoso.com,bob@contoso.com ./deploy.sh --new
 # =============================================================================
 set -euo pipefail
 
@@ -57,6 +59,7 @@ GITHUB_AGENT=false
 
 REUSE_ENV=""
 NEW_ENV=false
+WITH_ADMIN_ARGS=""
 
 for arg in "$@"; do
     case $arg in
@@ -72,6 +75,19 @@ for arg in "$@"; do
         --github) GITHUB_AGENT=true ;;
         --help|-h) SHOW_HELP=true ;;
         --reuse=*) REUSE_ENV="${arg#--reuse=}" ;;
+        --with-admin=*)
+            _val="${arg#--with-admin=}"
+            if [ -z "$_val" ]; then
+                echo "ERROR: --with-admin requires a value (UPN/email or object ID)" >&2
+                SHOW_HELP=true
+                HAD_INVALID_ARG=true
+            elif [ -z "$WITH_ADMIN_ARGS" ]; then
+                WITH_ADMIN_ARGS="$_val"
+            else
+                WITH_ADMIN_ARGS="${WITH_ADMIN_ARGS},${_val}"
+            fi
+            unset _val
+            ;;
         *)
             echo "ERROR: Unknown argument: $arg" >&2
             SHOW_HELP=true
@@ -542,6 +558,10 @@ Options:
   --no-portal                            Do not launch portal (default)
   --new                                  Force a new deployment (skip environment detection)
   --reuse=<rg-name>                      Reuse an existing resource group (non-interactive)
+  --with-admin=<upn|oid>                 Add a tenant user to the portal Administrators group
+                                         (repeatable; UPN/email or object ID; also reads
+                                         ISP_INITIAL_ADMINS env var, comma-separated).
+                                         Without this, only the signed-in az CLI user is added.
   --google                               Also deploy a Google Cloud cross-cloud agent
   --github                               Also deploy a GitHub Actions self-hosted runner agent
   --aws                                  (future) AWS cross-cloud agent
@@ -550,6 +570,8 @@ Options:
 
 Environment:
   REQUIRE_REAL_CA=false                  Allow YAML fallback if real Entra CA provisioning fails
+  ISP_INITIAL_ADMINS=<upn|oid>[,...]     Comma-separated list of users to seed into the portal
+                                         Administrators group (alternative to --with-admin)
 EOF
     if [ "$HAD_INVALID_ARG" = true ]; then
         exit 1
@@ -1843,11 +1865,62 @@ ISP_ADMIN_GROUP_ID=$(ensure_portal_group "$ISP_ADMIN_GROUP_ID" "$PORTAL_ADMIN_GR
 ISP_VIEWER_GROUP_ID=$(azd_env_get_from_blob "$AZD_VALUES" "ISP_VIEWER_GROUP_ID")
 ISP_VIEWER_GROUP_ID=$(ensure_portal_group "$ISP_VIEWER_GROUP_ID" "$PORTAL_VIEWER_GROUP_NAME" "$PORTAL_VIEWER_GROUP_NICKNAME")
 
-# Add current user to Agent Management Administrators (best-effort)
-CURRENT_USER_OID=$(az ad signed-in-user show --query "id" -o tsv 2>/dev/null || true)
-if [ -n "$CURRENT_USER_OID" ]; then
-    az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$CURRENT_USER_OID" 2>/dev/null || true
-    echo "   Current user added to Agent Management Administrators"
+# Seed portal Administrators group members.
+# Precedence:
+#   1. --with-admin=<upn|oid> flag(s) (comma-aggregated into WITH_ADMIN_ARGS)
+#   2. ISP_INITIAL_ADMINS env var (comma-separated UPNs/OIDs)
+#   3. Fallback: the signed-in az CLI user
+# Each entry is resolved to an Entra object ID before being added.
+resolve_user_oid() {
+    local value="$1"
+    if [[ "$value" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+        printf '%s\n' "$value"
+        return 0
+    fi
+    az ad user show --id "$value" --query "id" -o tsv 2>/dev/null
+}
+
+add_user_to_admin_group() {
+    local raw="$1"
+    local oid
+    oid=$(resolve_user_oid "$raw")
+    if [ -z "$oid" ]; then
+        echo "   ⚠  Could not resolve '${raw}' to an Entra user; skipped" >&2
+        return 1
+    fi
+    if az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$oid" 2>/dev/null; then
+        echo "   ✅ Added '${raw}' (${oid}) to ${PORTAL_ADMIN_GROUP_NAME}"
+    else
+        # Already a member is a success path
+        if az ad group member check --group "$ISP_ADMIN_GROUP_ID" --member-id "$oid" --query "value" -o tsv 2>/dev/null | grep -qi true; then
+            echo "   ℹ  '${raw}' (${oid}) already in ${PORTAL_ADMIN_GROUP_NAME}"
+        else
+            echo "   ⚠  Failed to add '${raw}' (${oid}) to ${PORTAL_ADMIN_GROUP_NAME}" >&2
+            return 1
+        fi
+    fi
+}
+
+INITIAL_ADMINS_CSV="${WITH_ADMIN_ARGS}"
+if [ -z "$INITIAL_ADMINS_CSV" ] && [ -n "${ISP_INITIAL_ADMINS:-}" ]; then
+    INITIAL_ADMINS_CSV="$ISP_INITIAL_ADMINS"
+fi
+
+if [ -n "$INITIAL_ADMINS_CSV" ]; then
+    IFS=',' read -r -a _initial_admins <<< "$INITIAL_ADMINS_CSV"
+    for _entry in "${_initial_admins[@]}"; do
+        _entry="$(echo "$_entry" | tr -d '[:space:]')"
+        [ -z "$_entry" ] && continue
+        add_user_to_admin_group "$_entry" || true
+    done
+    unset _initial_admins _entry
+else
+    CURRENT_USER_OID=$(az ad signed-in-user show --query "id" -o tsv 2>/dev/null || true)
+    if [ -n "$CURRENT_USER_OID" ]; then
+        az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$CURRENT_USER_OID" 2>/dev/null || true
+        echo "   Current az-login user added to ${PORTAL_ADMIN_GROUP_NAME}"
+        echo "   Tip: pass --with-admin=<upn|oid> (repeatable) or set ISP_INITIAL_ADMINS to seed others."
+    fi
 fi
 
 # Get portal FQDNs for redirect URIs (reload azd values — portal apps were just provisioned)
