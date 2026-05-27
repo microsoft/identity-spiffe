@@ -42,7 +42,7 @@ and gates access with dual-role Entra security groups.
 ### Core
 - Both portals as Container Apps with external ingress
 - Entra sign-in via MSAL.js (redirect flow)
-- Shared `Identity Research for Agent Management Using SPIFFE Administrators` / `Identity Research for Agent Management Using SPIFFE Viewers` groups with env-scoped portal app registrations
+- Shared `Agent Management Administrators` / `Agent Management Viewers` groups with env-scoped portal app registrations
 - Per-user audit trail (who changed what policy)
 - deploy.sh integration (build, provision, deploy portals)
 - fast `./deploy.sh --portal-only` path for portal/Security Portal changes without agent re-attestation
@@ -94,8 +94,8 @@ and gates access with dual-role Entra security groups.
   │                                                  │
   │  App Reg: "Identity Research for Agent Management Using SPIFFE Portal - Management [<env>]"     │
   │  App Reg: "Identity Research for Agent Management Using SPIFFE Portal - Security Portal Mock [<env>]"│
-  │  Group: "Identity Research for Agent Management Using SPIFFE Administrators"                     │
-  │  Group: "Identity Research for Agent Management Using SPIFFE Viewers"                            │
+  │  Group: "Agent Management Administrators"                     │
+  │  Group: "Agent Management Viewers"                            │
   └────────────────────────────────────────────────┘
 ```
 

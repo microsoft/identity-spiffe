@@ -33,7 +33,7 @@ from entra_scope import (  # noqa: E402
 )
 
 GRAPH_BASE = "https://graph.microsoft.com/beta"
-BLUEPRINT_PREFIX = "Identity Research for Agent Management Using SPIFFE Budget Backend Agents"
+BLUEPRINT_PREFIX = "Agent Management Budget Backend Agents"
 
 AGENTS = [
     "budget-report",

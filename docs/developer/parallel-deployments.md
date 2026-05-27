@@ -41,8 +41,8 @@ Scoped for new environments:
 
 Shared tenant-wide:
 
-- `Identity Research for Agent Management Using SPIFFE Administrators`
-- `Identity Research for Agent Management Using SPIFFE Viewers`
+- `Agent Management Administrators`
+- `Agent Management Viewers`
 - provisioner app
 - custom security attribute schema
 - generic high-risk Conditional Access model

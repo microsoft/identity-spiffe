@@ -50,7 +50,7 @@ def create_app(config_path="portal-config.json"):
             await http_client.aclose()
 
     app = FastAPI(
-        title="Identity Research for Agent Management Using SPIFFE Control Panel",
+        title="Agent Management Control Panel",
         version=get_portal_version(),
         lifespan=lifespan,
     )

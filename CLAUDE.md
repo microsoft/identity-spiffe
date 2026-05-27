@@ -22,7 +22,7 @@
 - `isp-portal` and `securityportal-mock` are separate Container Apps with Entra browser sign-in.
 - The portal backend is modular under `portal/app/`; `portal/server.py` is a thin wrapper.
 - Cloud policy config persistence uses Azure Blob Storage through managed identity.
-- Portal auth groups are shared tenant-wide: `Identity Research for Agent Management Using SPIFFE Administrators` and `Identity Research for Agent Management Using SPIFFE Viewers`.
+- Portal auth groups are shared tenant-wide: `Agent Management Administrators` and `Agent Management Viewers`.
 - New environments default to environment-scoped Entra names for Blueprints, Agent Identities, FICs, and portal app registrations.
 
 ## Deploy Guidance

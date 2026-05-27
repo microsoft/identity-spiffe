@@ -138,7 +138,7 @@ class EntraJWTValidator:
             return "viewer"
 
         raise PermissionError(
-            "Not authorized — request Identity Research for Agent Management Using SPIFFE Administrator or Identity Research for Agent Management Using SPIFFE Viewer role "
+            "Not authorized — request Agent Management Administrators or Agent Management Viewers role "
             "from your tenant administrator"
         )
 

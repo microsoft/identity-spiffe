@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Identity Research for Agent Management Using SPIFFE — Control Panel</title>
+<title>Agent Management — Control Panel</title>
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════
@@ -399,7 +399,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text-0); mi
 <div class="auth-splash" id="auth-splash" style="display:none;">
   <div class="auth-card">
     <div class="auth-logo">SPIFFE</div>
-    <div class="auth-title">Identity Research for Agent Management Using SPIFFE</div>
+    <div class="auth-title">Agent Management</div>
     <div class="auth-sub">Agentic Identity Management — Control Panel</div>
     <button class="auth-btn" id="auth-signin-btn" onclick="signIn()">
       <svg viewBox="0 0 21 21"><path fill="#f25022" d="M0 0h10v10H0z"/><path fill="#7fba00" d="M11 0h10v10H11z"/><path fill="#00a4ef" d="M0 11h10v10H0z"/><path fill="#ffb900" d="M11 11h10v10H11z"/></svg>
@@ -418,7 +418,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text-0); mi
   <div class="sidebar-brand">
     <div class="sidebar-logo" id="logo-btn">SPIFFE</div>
     <div>
-      <div class="sidebar-brand-text">Identity Research for Agent Management Using SPIFFE</div>
+      <div class="sidebar-brand-text">Agent Management</div>
       <div class="sidebar-brand-sub">Agentic IAM</div>
     </div>
   </div>
@@ -531,7 +531,7 @@ function acquireTokenAndSetUser(account) {
       var debugInfo = 'Groups in token: ' + JSON.stringify(groups) + ' | Roles: ' + JSON.stringify(roles) +
         ' | Expected admin: ' + (authConfig.admin_group_id || 'not set') +
         ' | Expected viewer: ' + (authConfig.viewer_group_id || 'not set');
-      errEl.textContent = 'Access Denied: Your account is not in the Identity Research for Agent Management Using SPIFFE Administrator or Identity Research for Agent Management Using SPIFFE Viewer group. Debug: ' + debugInfo;
+      errEl.textContent = 'Access Denied: Your account is not in the Agent Management Administrators or Agent Management Viewers group. Debug: ' + debugInfo;
       errEl.style.display = 'block';
       console.log('Auth debug — ID token claims:', claims);
       return Promise.reject('no_role');
