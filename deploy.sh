@@ -1880,18 +1880,40 @@ resolve_user_oid() {
     az ad user show --id "$value" --query "id" -o tsv 2>/dev/null
 }
 
+invite_guest_user() {
+    local email="$1"
+    local redirect="${2:-https://myapplications.microsoft.com}"
+    local body
+    body=$(python3 -c "import json,sys; print(json.dumps({'invitedUserEmailAddress': sys.argv[1], 'inviteRedirectUrl': sys.argv[2], 'sendInvitationMessage': True}))" "$email" "$redirect")
+    local resp
+    resp=$(az rest --method POST \
+        --uri "https://graph.microsoft.com/v1.0/invitations" \
+        --headers "Content-Type=application/json" \
+        --body "$body" 2>/dev/null) || {
+            echo "   ⚠  B2B invitation failed for '$email' (need User.Invite.All permission?)" >&2
+            return 1
+        }
+    python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('invitedUser',{}).get('id',''))" <<<"$resp"
+}
+
 add_user_to_admin_group() {
     local raw="$1"
     local oid
     oid=$(resolve_user_oid "$raw")
+    if [ -z "$oid" ] && [[ "$raw" == *"@"* ]]; then
+        echo "   ↳ '${raw}' not found in tenant; sending B2B guest invitation..." >&2
+        oid=$(invite_guest_user "$raw" "" || true)
+        if [ -n "$oid" ]; then
+            echo "   ↳ Invitation sent; new guest object ID: ${oid}" >&2
+        fi
+    fi
     if [ -z "$oid" ]; then
-        echo "   ⚠  Could not resolve '${raw}' to an Entra user; skipped" >&2
+        echo "   ⚠  Could not resolve or invite '${raw}'; skipped" >&2
         return 1
     fi
     if az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$oid" 2>/dev/null; then
         echo "   ✅ Added '${raw}' (${oid}) to ${PORTAL_ADMIN_GROUP_NAME}"
     else
-        # Already a member is a success path
         if az ad group member check --group "$ISP_ADMIN_GROUP_ID" --member-id "$oid" --query "value" -o tsv 2>/dev/null | grep -qi true; then
             echo "   ℹ  '${raw}' (${oid}) already in ${PORTAL_ADMIN_GROUP_NAME}"
         else
