@@ -193,6 +193,88 @@ if [[ ! "$AZD_ENV_NAME_PREFLIGHT" =~ ^(identity-spiffe|isp-) ]]; then
 fi
 
 echo "✅ azd env: ${AZD_ENV_NAME_PREFLIGHT} (target RG: rg-${AZD_ENV_NAME_PREFLIGHT})"
+
+# ---------------------------------------------------------------------------
+# Subscription preflight — render the picker OURSELVES instead of letting
+# `azd provision` drop into its TUI picker. On some terminals that TUI does
+# not render visibly (cursor just blinks with no prompt text), so the script
+# appears hung. Prompting in plain stdout guarantees the user sees the ask.
+# ---------------------------------------------------------------------------
+if ! command -v az &>/dev/null; then
+    echo "❌ az CLI not found. Install: brew install azure-cli" >&2
+    exit 1
+fi
+
+AZD_SUB_PREFLIGHT=$(azd env get-values 2>/dev/null | grep -E "^AZURE_SUBSCRIPTION_ID=" | cut -d'=' -f2- | tr -d '"' || true)
+
+if [ -z "$AZD_SUB_PREFLIGHT" ]; then
+    echo ""
+    echo "🔑 AZURE_SUBSCRIPTION_ID is not set in this azd env."
+    echo "   (azd provision would prompt here, but its TUI picker renders"
+    echo "    invisibly on some terminals — looks like a frozen cursor.)"
+    echo ""
+
+    if ! is_tty_stdin; then
+        echo "❌ Non-interactive shell — cannot prompt." >&2
+        echo "   Fix:" >&2
+        echo "     az account list -o table" >&2
+        echo "     azd env set AZURE_SUBSCRIPTION_ID <subscription-id>" >&2
+        exit 1
+    fi
+
+    _sub_list_tsv=$(az account list --query "[].[id,name,tenantId,isDefault]" -o tsv 2>/dev/null || true)
+    if [ -z "$_sub_list_tsv" ]; then
+        echo "❌ az not authenticated or no subscriptions visible. Run: az login" >&2
+        exit 1
+    fi
+
+    _sub_ids=()
+    _sub_names=()
+    _sub_tenants=()
+    _sub_defaults=()
+    while IFS=$'\t' read -r _sid _sname _stid _sdef; do
+        _sub_ids+=("$_sid")
+        _sub_names+=("$_sname")
+        _sub_tenants+=("$_stid")
+        _sub_defaults+=("$_sdef")
+    done <<< "$_sub_list_tsv"
+
+    echo "   Available subscriptions:"
+    echo "   ──────────────────────────────────────────────"
+    _default_idx=1
+    for i in "${!_sub_ids[@]}"; do
+        _n=$((i + 1))
+        _marker=""
+        if [ "${_sub_defaults[$i]}" = "True" ] || [ "${_sub_defaults[$i]}" = "true" ]; then
+            _marker=" (default)"
+            _default_idx=$_n
+        fi
+        echo "   [$_n] ${_sub_names[$i]}${_marker}"
+        echo "       ${_sub_ids[$i]}  (tenant ${_sub_tenants[$i]})"
+    done
+    echo "   ──────────────────────────────────────────────"
+
+    if [ ${#_sub_ids[@]} -eq 1 ]; then
+        _selected_sub="${_sub_ids[0]}"
+        echo "   Only one subscription — using ${_sub_names[0]}"
+    else
+        printf "   Pick subscription [1-%d, default %d]: " "${#_sub_ids[@]}" "$_default_idx"
+        read -r _pick
+        [ -z "$_pick" ] && _pick=$_default_idx
+        if ! [[ "$_pick" =~ ^[0-9]+$ ]] || [ "$_pick" -lt 1 ] || [ "$_pick" -gt "${#_sub_ids[@]}" ]; then
+            echo "❌ Invalid selection: $_pick" >&2
+            exit 1
+        fi
+        _selected_sub="${_sub_ids[$((_pick - 1))]}"
+    fi
+
+    azd env set AZURE_SUBSCRIPTION_ID "$_selected_sub"
+    az account set --subscription "$_selected_sub"
+    echo "✅ AZURE_SUBSCRIPTION_ID=${_selected_sub}"
+    unset _sub_list_tsv _sub_ids _sub_names _sub_tenants _sub_defaults _default_idx _pick _selected_sub _sid _sname _stid _sdef _n _marker
+else
+    echo "✅ AZURE_SUBSCRIPTION_ID=${AZD_SUB_PREFLIGHT}"
+fi
 fi  # end SHOW_HELP guard around early azd preflight
 
 # ---------------------------------------------------------------------------
@@ -892,7 +974,10 @@ else
     echo "   SPIRE Server → VM (Standard_B1s, Docker via cloud-init)"
     echo "   Agents → Container Apps (with sidecar slots for SPIFFE proxy)"
 
-    azd provision
+    # --no-prompt: fail loud if any required value is missing, instead of
+    # blocking on an invisible TUI prompt. Subscription/location are set by
+    # the preflight above; anything else missing is a real misconfig.
+    azd provision --no-prompt
     echo "✅ Done"
 fi
 echo ""
