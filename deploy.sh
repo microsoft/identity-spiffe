@@ -2018,11 +2018,14 @@ ISP_VIEWER_GROUP_ID=$(azd_env_get_from_blob "$AZD_VALUES" "ISP_VIEWER_GROUP_ID")
 ISP_VIEWER_GROUP_ID=$(ensure_portal_group "$ISP_VIEWER_GROUP_ID" "$PORTAL_VIEWER_GROUP_NAME" "$PORTAL_VIEWER_GROUP_NICKNAME")
 
 # Seed portal Administrators group members.
-# Precedence:
-#   1. --with-admin=<upn|oid> flag(s) (comma-aggregated into WITH_ADMIN_ARGS)
-#   2. ISP_INITIAL_ADMINS env var (comma-separated UPNs/OIDs)
-#   3. Fallback: the signed-in az CLI user
-# Each entry is resolved to an Entra object ID before being added.
+# Behavior:
+#   - The signed-in az CLI user is ALWAYS seeded as admin (deployer needs
+#     access — eliminates the lockout footgun where a typo'd --with-admin
+#     produced an empty admin group with no fallback).
+#   - --with-admin=<upn|oid> flags and ISP_INITIAL_ADMINS env var ADD additional
+#     admins on top of the deployer.
+#   - Graph errors are surfaced (no more 2>/dev/null swallowing User.Invite.All
+#     permission denials), and the group is verified non-empty at the end.
 resolve_user_oid() {
     local value="$1"
     if [[ "$value" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
@@ -2037,14 +2040,18 @@ invite_guest_user() {
     local redirect="${2:-https://myapplications.microsoft.com}"
     local body
     body=$(python3 -c "import json,sys; print(json.dumps({'invitedUserEmailAddress': sys.argv[1], 'inviteRedirectUrl': sys.argv[2], 'sendInvitationMessage': True}))" "$email" "$redirect")
+    # Do NOT redirect stderr — az's permission/error messages are the diagnostic
+    # signal that tells the user WHY the invite failed (User.Invite.All missing,
+    # tenant policy block, etc.).
     local resp
-    resp=$(az rest --method POST \
+    if ! resp=$(az rest --method POST \
         --uri "https://graph.microsoft.com/v1.0/invitations" \
         --headers "Content-Type=application/json" \
-        --body "$body" 2>/dev/null) || {
-            echo "   ⚠  B2B invitation failed for '$email' (need User.Invite.All permission?)" >&2
-            return 1
-        }
+        --body "$body"); then
+        echo "   ⚠  B2B invitation API call failed for '$email'." >&2
+        echo "       Most common cause: signed-in identity lacks Graph User.Invite.All permission." >&2
+        return 1
+    fi
     python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('invitedUser',{}).get('id',''))" <<<"$resp"
 }
 
@@ -2053,28 +2060,49 @@ add_user_to_admin_group() {
     local oid
     oid=$(resolve_user_oid "$raw")
     if [ -z "$oid" ] && [[ "$raw" == *"@"* ]]; then
-        echo "   ↳ '${raw}' not found in tenant; sending B2B guest invitation..." >&2
+        echo "   ↳ '${raw}' not found as tenant member; attempting B2B guest invitation..." >&2
         oid=$(invite_guest_user "$raw" "" || true)
         if [ -n "$oid" ]; then
             echo "   ↳ Invitation sent; new guest object ID: ${oid}" >&2
         fi
     fi
     if [ -z "$oid" ]; then
-        echo "   ⚠  Could not resolve or invite '${raw}'; skipped" >&2
+        echo "   ❌ Could not resolve or invite '${raw}'." >&2
+        echo "       Check for typos: az ad user show --id '${raw}'" >&2
+        echo "       Add manually after deploy: ./scripts/portal-members.sh add-admin '${raw}'" >&2
         return 1
     fi
-    if az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$oid" 2>/dev/null; then
+    # Capture stderr — az ad group member add prints useful errors (auth, RBAC,
+    # 'directory object not found') that the user needs to see when this fails.
+    local add_err
+    if add_err=$(az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$oid" 2>&1); then
         echo "   ✅ Added '${raw}' (${oid}) to ${PORTAL_ADMIN_GROUP_NAME}"
+    elif az ad group member check --group "$ISP_ADMIN_GROUP_ID" --member-id "$oid" --query "value" -o tsv 2>/dev/null | grep -qi true; then
+        echo "   ℹ  '${raw}' (${oid}) already in ${PORTAL_ADMIN_GROUP_NAME}"
     else
-        if az ad group member check --group "$ISP_ADMIN_GROUP_ID" --member-id "$oid" --query "value" -o tsv 2>/dev/null | grep -qi true; then
-            echo "   ℹ  '${raw}' (${oid}) already in ${PORTAL_ADMIN_GROUP_NAME}"
-        else
-            echo "   ⚠  Failed to add '${raw}' (${oid}) to ${PORTAL_ADMIN_GROUP_NAME}" >&2
-            return 1
-        fi
+        echo "   ❌ Failed to add '${raw}' (${oid}) to ${PORTAL_ADMIN_GROUP_NAME}" >&2
+        echo "       az error: $(echo "$add_err" | head -3 | tr '\n' ' ')" >&2
+        return 1
     fi
 }
 
+# 1. ALWAYS seed the deployer (signed-in az CLI user) first. This guarantees
+#    at least one admin exists even if every --with-admin entry fails to resolve.
+CURRENT_USER_OID=$(az ad signed-in-user show --query "id" -o tsv 2>/dev/null || true)
+CURRENT_USER_UPN=$(az ad signed-in-user show --query "userPrincipalName" -o tsv 2>/dev/null || true)
+if [ -n "$CURRENT_USER_OID" ]; then
+    if az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$CURRENT_USER_OID" 2>/dev/null; then
+        echo "   ✅ Seeded deployer '${CURRENT_USER_UPN:-$CURRENT_USER_OID}' as admin"
+    elif az ad group member check --group "$ISP_ADMIN_GROUP_ID" --member-id "$CURRENT_USER_OID" --query "value" -o tsv 2>/dev/null | grep -qi true; then
+        echo "   ℹ  Deployer '${CURRENT_USER_UPN:-$CURRENT_USER_OID}' already admin"
+    else
+        echo "   ⚠  Could not add deployer to admin group (check az login + Group.ReadWrite.All)" >&2
+    fi
+else
+    echo "   ⚠  Could not resolve signed-in az user — deployer not seeded as admin" >&2
+fi
+
+# 2. Additionally seed any explicit --with-admin / ISP_INITIAL_ADMINS entries.
 INITIAL_ADMINS_CSV="${WITH_ADMIN_ARGS}"
 if [ -z "$INITIAL_ADMINS_CSV" ] && [ -n "${ISP_INITIAL_ADMINS:-}" ]; then
     INITIAL_ADMINS_CSV="$ISP_INITIAL_ADMINS"
@@ -2088,13 +2116,23 @@ if [ -n "$INITIAL_ADMINS_CSV" ]; then
         add_user_to_admin_group "$_entry" || true
     done
     unset _initial_admins _entry
+fi
+
+# 3. Verify the admin group is non-empty. If somehow nothing landed (deployer
+#    seed failed AND no --with-admin entries succeeded), fail loud with the exact
+#    recovery command. Without this check the script appears successful but the
+#    portal is unusable — exactly the bug this block fixes.
+ADMIN_COUNT=$(az ad group member list --group "$ISP_ADMIN_GROUP_ID" --query "length([])" -o tsv 2>/dev/null || echo "0")
+if [ "${ADMIN_COUNT:-0}" -lt 1 ]; then
+    echo "" >&2
+    echo "❌ ${PORTAL_ADMIN_GROUP_NAME} is EMPTY after seeding." >&2
+    echo "   Portal sign-in will be blocked for everyone until an admin is added." >&2
+    echo "" >&2
+    echo "   Fix:" >&2
+    echo "     ./scripts/portal-members.sh add-admin <your-upn>" >&2
+    echo "" >&2
 else
-    CURRENT_USER_OID=$(az ad signed-in-user show --query "id" -o tsv 2>/dev/null || true)
-    if [ -n "$CURRENT_USER_OID" ]; then
-        az ad group member add --group "$ISP_ADMIN_GROUP_ID" --member-id "$CURRENT_USER_OID" 2>/dev/null || true
-        echo "   Current az-login user added to ${PORTAL_ADMIN_GROUP_NAME}"
-        echo "   Tip: pass --with-admin=<upn|oid> (repeatable) or set ISP_INITIAL_ADMINS to seed others."
-    fi
+    echo "   ${PORTAL_ADMIN_GROUP_NAME}: ${ADMIN_COUNT} member(s)"
 fi
 
 # Get portal FQDNs for redirect URIs (reload azd values — portal apps were just provisioned)
