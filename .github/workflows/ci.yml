@@ -85,6 +85,7 @@ jobs:
       - name: Run agent tests
         run: |
           python -m unittest \
+            scripts/tests/test_deployment_status.py \
             src/test_agents.py \
             src/test_token_error_contract.py \
             src/shared/test_credential_providers.py \
