@@ -4,7 +4,7 @@
 >
 > **Last updated:** 2026-04-19
 > **Sources:** GitHub OIDC docs, Entra FIC docs, Azure Flexible FIC preview docs
-> **Related:** `docs/architecture/next-github-actions-agent-federation.md`
+> **Related work:** [#34](https://github.com/microsoft/identity-spiffe/issues/34)
 
 ---
 

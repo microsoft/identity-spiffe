@@ -4,7 +4,7 @@
 >
 > **Last updated:** 2026-04-02
 > **Sources:** SPIRE plugin docs, Entra WIF docs, GCP OIDC docs, implementation PoC analysis
-> **Related:** `docs/architecture/next-google-cloud-agent-federation.md`
+> **Related work:** [#35](https://github.com/microsoft/identity-spiffe/issues/35)
 
 ---
 
@@ -359,5 +359,5 @@ These are GCP-only considerations that don't apply to AWS or ServiceNow:
 - [Entra Workload Identity Federation](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation)
 - [GCE Instance Identity Tokens](https://cloud.google.com/compute/docs/instances/verifying-instance-identity)
 - [Entra + GCP federation walkthrough](https://blog.identitydigest.com/azuread-federate-gcp/)
-- `docs/architecture/next-google-cloud-agent-federation.md` — implementation plan
+- [#35](https://github.com/microsoft/identity-spiffe/issues/35) — productization and validation backlog
 - `docs/runbooks/hard-won-learnings.md` — #30 (FIC subject), #31 (MSAL), #32 (container modes)

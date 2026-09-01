@@ -3,8 +3,8 @@
 // agentIdRiskLevels conditions, and determines which risk levels
 // should block callers based on live CA policy state.
 //
-// Currently evaluates: agentIdRiskLevels (risk enforcement)
-// TODO: Evaluate applicationFilter/servicePrincipalFilter (tag enforcement from CA)
+// Currently evaluates agentIdRiskLevels. Application and service-principal
+// filter evaluation is tracked in GitHub issue #31.
 package ca
 
 import (
