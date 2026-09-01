@@ -31,7 +31,7 @@ type caCachedPolicy struct {
 	State         string   `json:"state"`
 	RiskLevels    []string `json:"risk_levels"`
 	IsBlockPolicy bool     `json:"is_block_policy"`
-	// TODO: Add tag filter fields when implementing CA-driven tag evaluation.
+	// CA-driven tag filter fields are tracked in GitHub issue #31.
 	// These would be parsed from conditions.clientApplications.servicePrincipalFilter
 	// and conditions.applications.applicationFilter rule expressions.
 }

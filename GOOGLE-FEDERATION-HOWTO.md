@@ -6,7 +6,8 @@ One command (`./deploy.sh --new --google`) deploys the full stack end-to-end.
 
 **References:**
 
-- Architecture: [`docs/architecture/next-google-cloud-agent-federation.md`](docs/architecture/next-google-cloud-agent-federation.md)
+- Platform learnings: [`docs/platform-learnings/Google-Cloud-Federation.md`](docs/platform-learnings/Google-Cloud-Federation.md)
+- Productization and validation backlog: [#35](https://github.com/microsoft/identity-spiffe/issues/35)
 
 ---
 
@@ -139,7 +140,8 @@ SPIFFE SVID from trust domain gcp.aim.microsoft.com
     (3) JWT present with required roles, (4) RBAC policy permits path+method
 ```
 
-For the full architecture, see [`docs/architecture/next-google-cloud-agent-federation.md`](docs/architecture/next-google-cloud-agent-federation.md).
+For the identity and transport architecture, see
+[`docs/platform-learnings/Google-Cloud-Federation.md`](docs/platform-learnings/Google-Cloud-Federation.md).
 
 ---
 
@@ -234,7 +236,8 @@ Exchange trust bundles on both SPIRE servers and add a `federatesWith` entry on 
 
 ## See Also
 
-- [`docs/architecture/next-google-cloud-agent-federation.md`](docs/architecture/next-google-cloud-agent-federation.md) — architecture decision record
+- [#35](https://github.com/microsoft/identity-spiffe/issues/35) — productization and validation backlog
+- [`docs/platform-learnings/Google-Cloud-Federation.md`](docs/platform-learnings/Google-Cloud-Federation.md) — identity and transport learnings
 - [`docs/runbooks/hard-won-learnings.md`](docs/runbooks/hard-won-learnings.md) — #29 (container env nuke), #30 (FIC numeric ID), #31 (MSAL FIC gap), #32 (proxy-only mode)
 - Platform learnings: Google, AWS, ServiceNow — see `docs/runbooks/`
 - [`scripts/add-google-agent.sh`](scripts/add-google-agent.sh) — Entra identity provisioning

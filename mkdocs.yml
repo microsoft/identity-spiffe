@@ -40,9 +40,6 @@ nav:
           - RBAC Authorization: architecture/layers/rbac-authorization.md
           - OAuth2 and JWT: architecture/layers/oauth-jwt.md
           - Conditional Access Governance: architecture/layers/conditional-access.md
-      - Reference Designs:
-          - Google Cloud Agent Federation: architecture/next-google-cloud-agent-federation.md
-          - GitHub Actions Agent Federation: architecture/next-github-actions-agent-federation.md
   - Reference:
       - Management APIs: reference/management-apis.md
       - Authentication Flows: reference/authentication-flows.md

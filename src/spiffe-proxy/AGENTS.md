@@ -86,7 +86,7 @@ policies:
 - **Management API** endpoints: `GET /mgmt/policy`, `PUT /mgmt/policy`, `GET /mgmt/allowed-ids`, `PUT /mgmt/allowed-ids`, `GET /mgmt/health`
 - **gRPC tunnel** multiplexes HTTP requests over a single mTLS connection between egress and ingress proxies.
 - **SPIRE Agent monitor** — a background loop in `entrypoint.sh` checks the agent process every 10s and restarts it if it dies. This handles mid-run crashes (agent re-attests using cached key material in `/opt/spire/data/agent/`). Does NOT help on full container restart where the data dir is wiped and the join token is consumed.
-- **No `proxy-only` mode** — `entrypoint.sh` only supports `CONTAINER_MODE=server` and `CONTAINER_MODE=agent-proxy`. There is no mode for connecting to an external SPIRE Agent socket (needed for SPIFFE federation with `gcp_iit` attestation). See `docs/architecture/next-google-cloud-agent-federation.md` and hard-won-learnings #32.
+- **No `proxy-only` mode** — `entrypoint.sh` only supports `CONTAINER_MODE=server` and `CONTAINER_MODE=agent-proxy`. There is no mode for connecting to an external SPIRE Agent socket (needed for SPIFFE federation with `gcp_iit` attestation). See hard-won-learnings #32 and GitHub issue #35.
 
 ## Building
 

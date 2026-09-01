@@ -2,8 +2,15 @@
 
 > **Purpose:** Comprehensive reference for Claude Code instances working on CA enforcement in the Identity Research for Agent Management Using SPIFFE PoC. Load this file before working on admin governance, Layer 4 enforcement, agent risk, or custom security attributes.
 >
-> **Last updated:** 2026-03-20
+> **Last updated:** 2026-09-01
 > **Sources:** Microsoft Learn docs, Entra CA team briefings, ADR-010, admin-governance-layer.md
+>
+> **Historical scope:** Sections that say "Public Preview" describe the March
+> 2026 platform state in which these learnings were captured. Agent Identity
+> GA changes are documented in
+> `docs/platform-learnings/agent-id-blueprints-and-users.md`. Reconciliation
+> of the CA implementation and current platform terminology is tracked in
+> [#31](https://github.com/microsoft/identity-spiffe/issues/31).
 
 ---
 
@@ -251,7 +258,9 @@ For the PoC, we simulate agent risk via an external "Security Portal" mock porta
 - RBAC engine checks risk before evaluating rules
 - If risk matches `blocked_risk_levels` in CA policy → 403
 
-**Future:** Agent risk will be a CA claim in the JWT token, evaluated at both STS and data plane.
+The target model is to carry agent risk into both STS and data-plane
+evaluation. Completion and validation are tracked in
+[#31](https://github.com/microsoft/identity-spiffe/issues/31).
 
 ### CA Authentication Flow Coverage for Agents
 

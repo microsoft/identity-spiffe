@@ -5,11 +5,8 @@ Reads CA policies from Microsoft Graph API and evaluates whether a caller's
 risk level should result in denial based on the Entra CA policy's
 agentIdRiskLevels condition.
 
-Currently evaluates: agentIdRiskLevels (risk enforcement)
-TODO: Evaluate applicationFilter/servicePrincipalFilter (tag enforcement from CA policy)
-      This would replace the hardcoded tag matching with CA-policy-driven tag evaluation
-      by parsing filter rule expressions like:
-        CustomSecurityAttribute.AgentIdentity_Department -eq "Finance"
+Currently evaluates: agentIdRiskLevels (risk enforcement).
+Application and service-principal filter evaluation is tracked in GitHub #31.
 
 This module is imported by agent apps (budget-approval, budget-report, etc.)
 for direct A2A enforcement — the same enforcement the sidecar performs at
