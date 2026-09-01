@@ -4111,7 +4111,7 @@ function renderOAuth(root) {
   // ── CA Admin Governance (Layer 4b) ──
   var govTitle = document.createElement('div'); govTitle.className = 'section-title'; govTitle.style.marginTop = '12px'; govTitle.textContent = 'Layer 4b: Admin Governance'; root.appendChild(govTitle);
   var govSubtitle = document.createElement('div'); govSubtitle.style.cssText = 'font-size:12px;color:var(--text-2);margin-bottom:16px';
-  govSubtitle.textContent = 'Agent tags, risk levels, and CA enforcement state from v5.0 policy + sidecar risk store + Entra ID Protection'; root.appendChild(govSubtitle);
+  govSubtitle.textContent = 'Agent tags, risk levels, and CA enforcement state from v5.0 policy'; root.appendChild(govSubtitle);
 
   var caBtnWrap = document.createElement('div'); caBtnWrap.style.cssText = 'display:flex;gap:8px;margin-bottom:16px';
   var loadCaBtn = document.createElement('button'); loadCaBtn.className = 'btn-refresh'; loadCaBtn.textContent = 'Load CA Status';
@@ -4140,6 +4140,18 @@ function renderOAuth(root) {
   if (state.caGovData) {
     var gov = state.caGovData.admin_governance || {};
     var govAgents = state.caGovData.agents || [];
+    var riskProvider = state.caGovData.risk_provider || 'entra';
+    var providerBadge = document.createElement('div'); providerBadge.style.cssText = 'margin-bottom:12px';
+    var providerLabel = document.createElement('span'); providerLabel.className = 'badge';
+    if (riskProvider === 'sidecar') {
+      providerLabel.style.cssText = 'background:var(--amber-light);color:var(--amber);border:1px solid var(--amber-border)';
+      providerLabel.textContent = 'Risk source: authenticated sidecar store (demo mode)';
+    } else {
+      providerLabel.style.cssText = 'background:var(--green-light);color:var(--green);border:1px solid var(--green-border)';
+      providerLabel.textContent = 'Risk source: Entra ID Protection';
+    }
+    providerBadge.appendChild(providerLabel);
+    root.appendChild(providerBadge);
 
     // Admin Governance summary
     var govGrid = document.createElement('div'); govGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:16px 0';
@@ -4229,21 +4241,21 @@ function renderOAuth(root) {
         else { matchBadge.style.cssText = 'background:var(--amber-light);color:var(--amber);border:1px solid var(--amber-border)'; matchBadge.textContent = 'Mismatch'; }
         td4.appendChild(matchBadge); tr.appendChild(td4);
 
-        // Risk level — authoritative from Entra ID Protection (Graph riskyAgents API)
+        // Risk level from the configured authoritative provider.
         var td5 = document.createElement('td'); td5.style.cssText = 'padding:8px 12px';
-        var entraRisk = ag.entra_risk_level || 'none';
-        var entraState = ag.entra_risk_state || 'notAtRisk';
-        var entraLabel = entraRisk === 'none' ? 'safe' : entraRisk;
-        var entraColor = entraRisk === 'high' ? 'var(--red)' : entraRisk === 'medium' ? 'var(--amber)' : 'var(--green)';
-        var entraBg = entraRisk === 'high' ? 'var(--red-light,#fde8e8)' : entraRisk === 'medium' ? 'var(--amber-light)' : 'var(--green-light)';
+        var displayedRisk = riskProvider === 'sidecar' ? (ag.current_risk || 'unknown') : (ag.entra_risk_level || 'none');
+        var displayedState = riskProvider === 'sidecar' ? '' : (ag.entra_risk_state || 'notAtRisk');
+        var displayedLabel = displayedRisk === 'none' ? 'safe' : displayedRisk;
+        var displayedColor = displayedRisk === 'high' ? 'var(--red)' : displayedRisk === 'medium' ? 'var(--amber)' : displayedRisk === 'unknown' ? 'var(--text-3)' : 'var(--green)';
+        var displayedBg = displayedRisk === 'high' ? 'var(--red-light,#fde8e8)' : displayedRisk === 'medium' ? 'var(--amber-light)' : displayedRisk === 'unknown' ? 'var(--bg)' : 'var(--green-light)';
         var entraBadge = document.createElement('span'); entraBadge.className = 'badge';
-        entraBadge.style.cssText = 'background:' + entraBg + ';color:' + entraColor + ';border:1px solid ' + entraColor;
-        entraBadge.textContent = entraLabel;
+        entraBadge.style.cssText = 'background:' + displayedBg + ';color:' + displayedColor + ';border:1px solid ' + displayedColor;
+        entraBadge.textContent = displayedLabel;
         td5.appendChild(entraBadge);
-        if (entraState !== 'notAtRisk' && entraRisk !== 'none') {
+        if (displayedState !== 'notAtRisk' && displayedState && displayedRisk !== 'none') {
           var stateNote = document.createElement('span');
           stateNote.style.cssText = 'margin-left:6px;font-size:10px;color:var(--text-3)';
-          stateNote.textContent = entraState;
+          stateNote.textContent = displayedState;
           td5.appendChild(stateNote);
         }
         tr.appendChild(td5);
@@ -4262,10 +4274,12 @@ function renderOAuth(root) {
         // Actions: risk dropdown + apply
         var td7 = document.createElement('td'); td7.style.cssText = 'padding:8px 12px';
         var riskSelect = document.createElement('select'); riskSelect.style.cssText = 'font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;margin-right:4px';
-        var currentEntraRisk = (ag.entra_risk_level === 'none' || !ag.entra_risk_level) ? 'low' : ag.entra_risk_level;
+        var currentRisk = riskProvider === 'sidecar'
+          ? ag.current_risk
+          : ((ag.entra_risk_level === 'none' || !ag.entra_risk_level) ? 'low' : ag.entra_risk_level);
         ['low', 'medium', 'high'].forEach(function(lvl) {
           var opt = document.createElement('option'); opt.value = lvl; opt.textContent = lvl;
-          if (lvl === currentEntraRisk) opt.selected = true;
+          if (lvl === currentRisk) opt.selected = true;
           riskSelect.appendChild(opt);
         });
         td7.appendChild(riskSelect);
@@ -4277,8 +4291,12 @@ function renderOAuth(root) {
             btnEl.textContent = 'Updating...'; btnEl.disabled = true;
             api('/agent-risk', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spiffe_id: agentData.spiffe_id, risk_level: newRisk }) })
               .then(function(result) {
-                var entraStatus = result && result.entra ? result.entra.entra_status : 'unknown';
-                btnEl.textContent = entraStatus === 'success' ? 'Sent to Entra' : 'Sent (Entra: ' + entraStatus + ')';
+                if (result && result.risk_provider === 'sidecar') {
+                  btnEl.textContent = 'Sent to sidecar store';
+                } else {
+                  var entraStatus = result && result.entra ? result.entra.entra_status : 'unknown';
+                  btnEl.textContent = entraStatus === 'success' ? 'Sent to Entra' : 'Sent (Entra: ' + entraStatus + ')';
+                }
                 btnEl.style.background = 'var(--green-light)'; btnEl.style.color = 'var(--green)'; btnEl.style.borderColor = 'var(--green)';
                 // Delay re-fetch to allow Entra propagation
                 setTimeout(function() {

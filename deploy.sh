@@ -1200,6 +1200,13 @@ fi
 AZD_VALUES_GRAPH=$(azd_env_load)
 GRAPH_CLIENT_ID=$(azd_env_get_from_blob "$AZD_VALUES_GRAPH" "ENTRA_AGENTID_CLIENT_ID")
 GRAPH_CLIENT_SECRET=$(azd_env_get_from_blob "$AZD_VALUES_GRAPH" "ENTRA_AGENTID_CLIENT_SECRET")
+AZD_CA_RISK_PROVIDER=$(azd_env_get_from_blob "$AZD_VALUES_GRAPH" "CA_RISK_PROVIDER")
+CA_RISK_PROVIDER="${CA_RISK_PROVIDER:-${AZD_CA_RISK_PROVIDER:-entra}}"
+if [ "$CA_RISK_PROVIDER" != "entra" ] && [ "$CA_RISK_PROVIDER" != "sidecar" ]; then
+    echo "ERROR: CA_RISK_PROVIDER must be 'entra' or 'sidecar' (got '$CA_RISK_PROVIDER')." >&2
+    exit 1
+fi
+echo "   CA risk provider: ${CA_RISK_PROVIDER}"
 if [ -n "${GRAPH_CLIENT_ID:-}" ] && [ -n "${GRAPH_CLIENT_SECRET:-}" ]; then
     echo "   Graph API credentials: ✓ (CA policy evaluation enabled)"
 else
@@ -1548,6 +1555,7 @@ for AGENT in "${AGENTS[@]}"; do
         export MI_CLIENT_ID_EMPLOYEE_MENUS="$MI_CLIENT_ID_EMPLOYEE_MENUS"
         export GRAPH_CLIENT_ID="$GRAPH_CLIENT_ID"
         export GRAPH_CLIENT_SECRET="$GRAPH_CLIENT_SECRET"
+        export CA_RISK_PROVIDER="$CA_RISK_PROVIDER"
         export ENTRA_AGENT_OID_BUDGET_REPORT="$ENTRA_AGENT_OID_BUDGET_REPORT"
         export ENTRA_AGENT_OID_BUDGET_APPROVAL="$ENTRA_AGENT_OID_BUDGET_APPROVAL"
         export ENTRA_AGENT_OID_ADMIN_CONTROL_PLANE="$ENTRA_AGENT_OID_ADMIN_CONTROL_PLANE"
@@ -1591,6 +1599,7 @@ oauth2_vars = {
 # Graph API credentials for CA policy evaluation (provisioner app)
 graph_client_id = os.environ.get("GRAPH_CLIENT_ID", "")
 graph_client_secret = os.environ.get("GRAPH_CLIENT_SECRET", "")
+ca_risk_provider = os.environ.get("CA_RISK_PROVIDER", "entra")
 
 with open(yaml_file) as f:
     app = yaml.safe_load(f)
@@ -1686,6 +1695,7 @@ for container in containers:
                        'A2A_TARGET_URL_BUDGET_APPROVAL',
                        'ADMIN_CONTROL_PLANE_ENDPOINT',
                        'RISK_STORE_URL',
+                       'CA_RISK_PROVIDER',
                        'GRAPH_CLIENT_ID', 'GRAPH_CLIENT_SECRET',
                        'ENTRA_AGENT_ID_BUDGET_REPORT', 'ENTRA_AGENT_ID_BUDGET_APPROVAL',
                        'ENTRA_AGENT_ID_EMPLOYEE_MENUS'}
@@ -1755,6 +1765,7 @@ for container in containers:
         if graph_client_id and graph_client_secret:
             env_list.append({'name': 'GRAPH_CLIENT_ID', 'value': graph_client_id})
             env_list.append({'name': 'GRAPH_CLIENT_SECRET', 'value': graph_client_secret})
+        env_list.append({'name': 'CA_RISK_PROVIDER', 'value': ca_risk_provider})
         container['env'] = env_list
         break
 
@@ -2232,6 +2243,7 @@ if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
         "ISP_ADMIN_GROUP_ID=${ISP_ADMIN_GROUP_ID}"
         "ISP_VIEWER_GROUP_ID=${ISP_VIEWER_GROUP_ID}"
         "PORTAL_MODE=cloud"
+        "CA_RISK_PROVIDER=${CA_RISK_PROVIDER}"
     )
     if [ -n "$STORAGE_ACCOUNT" ]; then
         portal_env_vars+=(

@@ -31,6 +31,7 @@ GRAPH_CLIENT_ID = os.getenv("GRAPH_CLIENT_ID", "")
 GRAPH_CLIENT_SECRET = os.getenv("GRAPH_CLIENT_SECRET", "")
 AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID", "")
 GRAPH_BETA = "https://graph.microsoft.com/beta"
+CA_RISK_PROVIDER = os.getenv("CA_RISK_PROVIDER", "entra").lower()
 
 # Cache TTLs
 CA_POLICY_CACHE_TTL = int(os.getenv("CA_POLICY_CACHE_TTL", "60"))
@@ -266,7 +267,8 @@ class CAEvaluator:
 
         Args:
             caller_oid: The Entra agent identity OID (appId) of the caller.
-            fallback_risk: IGNORED — kept for API compat but Entra is sole source.
+            fallback_risk: Risk from the authenticated sidecar store. Used only
+                when CA_RISK_PROVIDER=sidecar.
 
         Returns:
             (blocked: bool, details: dict) where details includes enforcement info.
@@ -305,6 +307,32 @@ class CAEvaluator:
             details["agent_risk"] = "n/a"
             details["risk_source"] = "entra_ca_policy"
             return False, details
+
+        if CA_RISK_PROVIDER == "sidecar":
+            if fallback_risk not in ("none", "low", "medium", "high"):
+                details["enforcement_source"] = "fail_closed"
+                details["reason"] = "Cannot determine caller risk from sidecar store — DENY (fail closed)"
+                details["agent_risk"] = "unknown"
+                details["risk_source"] = "unavailable"
+                details["enforcement_layer"] = "conditional_access"
+                return True, details
+            details["agent_risk"] = fallback_risk
+            details["risk_source"] = "sidecar"
+            details["enforcement_source"] = "sidecar_risk_store"
+            if fallback_risk in blocked_levels:
+                details["reason"] = "high_risk_agent_blocked"
+                details["enforcement_layer"] = "conditional_access"
+                return True, details
+            details["reason"] = "risk_level_not_blocked"
+            return False, details
+
+        if CA_RISK_PROVIDER != "entra":
+            details["enforcement_source"] = "fail_closed"
+            details["reason"] = "Unknown CA risk provider — DENY (fail closed)"
+            details["agent_risk"] = "unknown"
+            details["risk_source"] = "unavailable"
+            details["enforcement_layer"] = "conditional_access"
+            return True, details
 
         # Fetch caller's risk from Entra ID Protection (resolves appId -> SP OID)
         caller_risk = await self.fetch_agent_risk(caller_oid)
