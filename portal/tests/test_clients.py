@@ -8,6 +8,7 @@ from portal.app.clients.admin_control_plane import AdminControlPlaneClient
 from portal.app.clients.agent_invoker import AgentInvokerClient
 from portal.app.clients.graph import GraphClient
 from portal.app.errors import PortalError
+from portal.app.services.ca import CAService
 
 
 def _request(method, url):
@@ -70,6 +71,81 @@ class TestGraphClient(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.exception.status_code, 502)
         self.assertEqual(ctx.exception.error_code, "graph_attribute_lookup_failed")
+
+
+class TestCAService(unittest.IsolatedAsyncioTestCase):
+    async def test_sidecar_status_uses_sidecar_risk_without_graph_query(self):
+        agent = SimpleNamespace(
+            name="BudgetReport",
+            spiffe_id="spiffe://example/budget-report",
+            entra_agent_id="agent-id",
+        )
+        settings = SimpleNamespace(
+            ca_risk_provider="sidecar",
+            agents={"budget-report": agent},
+            control_plane=SimpleNamespace(name="AdminControlPlane", spiffe_id=""),
+        )
+
+        async def get_json(path, _request_id):
+            responses = {
+                "policy": {
+                    "version": "5.0",
+                    "policies": [{"name": "budget-report", "ca": {}}],
+                },
+                "agent-risk": {
+                    "risks": {"spiffe://example/budget-report": "high"},
+                },
+                "agent-tags": {"tags": {}},
+                "ca-policy-effective": {
+                    "blocked_risk_levels": ["high"],
+                },
+            }
+            return responses[path]
+
+        graph_client = SimpleNamespace(
+            configured=True,
+            fetch_risky_agents=AsyncMock(),
+        )
+        service = CAService(
+            settings,
+            SimpleNamespace(get_json=get_json),
+            graph_client,
+            SimpleNamespace(),
+        )
+
+        result = await service.get_ca_status("request-id")
+
+        self.assertEqual(result["risk_provider"], "sidecar")
+        self.assertEqual(result["agents"][0]["current_risk"], "high")
+        graph_client.fetch_risky_agents.assert_not_awaited()
+
+    async def test_sidecar_risk_provider_does_not_query_unlicensed_graph_api(self):
+        settings = SimpleNamespace(
+            ca_risk_provider="sidecar",
+            agents={},
+        )
+        admin_client = SimpleNamespace(
+            put_json=AsyncMock(return_value={"status": "updated"})
+        )
+        graph_client = SimpleNamespace(
+            push_agent_risk=AsyncMock(),
+        )
+        service = CAService(
+            settings,
+            admin_client,
+            graph_client,
+            SimpleNamespace(),
+        )
+        service._resolve_agent_oid = lambda _spiffe_id: "agent-id"
+
+        result = await service.update_agent_risk(
+            "spiffe://example/agent",
+            "high",
+            "request-id",
+        )
+
+        self.assertEqual(result["risk_provider"], "sidecar")
+        graph_client.push_agent_risk.assert_not_awaited()
 
 
 class TestAgentInvokerClient(unittest.IsolatedAsyncioTestCase):
