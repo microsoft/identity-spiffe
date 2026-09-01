@@ -13,6 +13,7 @@ Before changing authentication, deployment, or authorization code, read:
 
 - Read `docs/platform-learnings/agent-id-blueprints-and-users.md` before designing or changing any flow involving OAuth, OBO, Agent Identity, Agent Blueprints, Agent Users, MSAL, app registrations, redirect URIs, scopes, JWT validation, OIDC discovery, or PKCE.
 - Security paths fail closed. Missing Graph data, missing tokens, invalid JWTs, or unreachable control planes must not be interpreted as safe.
+- Use test-driven development for behavior changes: add or update a test, run it to confirm it fails for the intended reason, implement the smallest complete fix, then run the relevant suite again. Every security regression fix requires a regression test.
 - Test before committing. At minimum: Python syntax or relevant Python unit tests, relevant Go tests for `src/spiffe-proxy`, and `bash -n deploy.sh` when deployment scripts change.
 - Trace both sides of every dependency. If code reads an environment variable, secret, route, or config value, confirm the writer/source exists in the same change.
 - Do not use `azd deploy <service>` for agent services. Agent-side revisions consume join tokens and can break attestation. Use `./deploy.sh --skip-provision` or `./scripts/reattest.sh`.

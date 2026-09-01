@@ -83,7 +83,12 @@ jobs:
         run: pip install fastapi httpx uvicorn starlette "PyJWT[crypto]>=2.8.0"
 
       - name: Run agent tests
-        run: python -m unittest src/test_agents.py -v
+        run: |
+          python -m unittest \
+            src/test_agents.py \
+            src/test_token_error_contract.py \
+            src/shared/test_credential_providers.py \
+            -v
 
   docker-build:
     name: Docker build (spiffe-proxy)
