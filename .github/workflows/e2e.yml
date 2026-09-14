@@ -1,0 +1,59 @@
+name: Local browser and enforcement matrix
+
+on:
+  pull_request:
+    paths:
+      - 'tests/**'
+      - 'portal/**'
+      - 'securityportal-mock/**'
+      - 'src/**'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_GC: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/spiffe-proxy/go.mod
+          cache-dependency-path: src/spiffe-proxy/go.sum
+      - name: Prepare offline protocol prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          GOBIN="$PWD/tests/.tools/bin" go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
+          GOBIN="$PWD/tests/.tools/bin" go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+          echo "$PWD/tests/.tools/bin" >> "$GITHUB_PATH"
+          go -C src/spiffe-proxy mod download
+      - name: Install isolated harness dependencies
+        run: |
+          python -m venv tests/.venv
+          tests/.venv/bin/python -m pip install --require-hashes -r tests/requirements.lock
+          tests/.venv/bin/python -m playwright install --with-deps chromium
+      - name: Verify harness and repeat connected local matrix
+        run: tests/.venv/bin/python tests/check.py --repeat 2 --timeout 300 --output tests/artifacts/ci-check
+      - name: Upload local sanitized matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-enforcement-matrix
+          path: |
+            tests/artifacts/ci-check/check.json
+            tests/artifacts/ci-check/check.md
+            tests/artifacts/ci-check/unit-*.json
+            tests/artifacts/ci-check/run-*/matrix.json
+            tests/artifacts/ci-check/run-*/matrix.md
+            tests/artifacts/ci-check/run-*/junit.xml
+          if-no-files-found: warn
+          retention-days: 7
