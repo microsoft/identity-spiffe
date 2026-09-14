@@ -407,10 +407,12 @@ def mutate(live, kind, evidence):
         raise Requirement("Fixture is already at the requested denied state")
     url = endpoint(live, "sidecar") + "/" + route
     evidence["cleanup_verified"] = False
+    mutation_acknowledged = False
     try:
         status, _ = call(live, "PUT", url, admin(live), {"spiffe_id": sid, field: changed})
         if status != 200:
             raise CheckFailure("Scoped mutation was not acknowledged")
+        mutation_acknowledged = True
         state = get_management(live, route, local=True).get(collection)
         if not isinstance(state, dict) or state.get(sid) != changed:
             raise CheckFailure("Scoped mutation readback differs")
@@ -426,9 +428,13 @@ def mutate(live, kind, evidence):
             restored = get_management(live, route, local=True).get(collection)
             if status != 200 or restored != snapshot:
                 raise CheckFailure("Cleanup failed: exact sidecar snapshot not restored")
-            evidence["cleanup_verified"] = True
         except (NetworkFailure, Requirement, CheckFailure):
             raise CheckFailure("Cleanup failed: restoration could not be verified") from None
+        # A client timeout cannot cancel a server write or order it before restoration.
+        if not mutation_acknowledged:
+            raise CheckFailure("Cleanup ambiguous: unacknowledged mutation may still complete; "
+                               "operator recovery required") from None
+        evidence["cleanup_verified"] = True
     assert_allowed(raw_call(live, "budget-report"), item, full=True)
     evidence["post_restore_allowed"] = True
 

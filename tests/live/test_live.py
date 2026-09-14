@@ -257,18 +257,67 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(result["status"], "BLOCKED")
         self.assertTrue(all(c.args[0] == "GET" for c in request.call_args_list))
 
-    def test_risk_restored_even_if_mutation_request_times_out(self):
-        config = self.mutation_config()
-        snapshot = (200, {"risks": {SID: "low"}})
-        sequence = [snapshot, (200, allowed()), adapter.NetworkFailure("timeout"),
-                    (200, {}), snapshot]
-        with patch.dict(os.environ, {"LIVE_DEDICATED": "dedicated-test"}), \
-                patch.object(adapter, "request", side_effect=sequence) as request:
-            result = adapter.run_case("live.ca.local-risk", config, "live")
-        self.assertEqual(result["status"], "FAIL")
-        self.assertTrue(result["evidence"]["cleanup_verified"])
-        puts = [c for c in request.call_args_list if c.args[0] == "PUT"]
-        self.assertEqual(puts[-1].args[3], {"spiffe_id": SID, "risk_level": "low"})
+    def test_unacknowledged_mutation_requires_operator_recovery_after_restore(self):
+        for kind, collection, field, original in [
+                ("risk", "risks", "risk_level", "low"), ("tag", "tags", "tag", "finance")]:
+            for response in [adapter.NetworkFailure("timeout"), (202, {}), (500, {})]:
+                snapshot = (200, {collection: {SID: original}})
+                sequence = [snapshot, (200, allowed()), response, (200, {}), snapshot]
+                with self.subTest(kind=kind, response=response), \
+                        patch.dict(os.environ, {"LIVE_DEDICATED": "dedicated-test"}), \
+                        patch.object(adapter, "request", side_effect=sequence) as request:
+                    result = adapter.run_case(f"live.ca.local-{kind}", self.mutation_config(), "live")
+                    self.assertEqual(result["status"], "FAIL")
+                    self.assertFalse(result["evidence"]["cleanup_verified"])
+                    self.assertIn("operator recovery required", result["observed"])
+                    self.assertNotIn("post_restore_allowed", result["evidence"])
+                    puts = [c for c in request.call_args_list if c.args[0] == "PUT"]
+                    self.assertEqual(len(puts), 2)
+                    self.assertEqual(puts[-1].args[3], {"spiffe_id": SID, field: original})
+
+    def test_late_mutation_cannot_be_certified_by_an_earlier_restore_readback(self):
+        for kind, collection, field, original, changed in [
+                ("risk", "risks", "risk_level", "low", "high"),
+                ("tag", "tags", "tag", "finance", "live-harness-deny")]:
+            store = {SID: original}
+            pending = []
+
+            def exchange(method, url, headers, body=None, timeout=20):
+                if "/call-backend-raw?" in url:
+                    return 200, allowed()
+                if method == "PUT":
+                    if body[field] == changed:
+                        pending.append(changed)
+                        raise adapter.NetworkFailure("timeout")
+                    store[SID] = body[field]
+                    return 200, {}
+                snapshot = {collection: dict(store)}
+                if pending:
+                    # The timed-out server write completes after the cleanup read.
+                    store[SID] = pending.pop()
+                return 200, snapshot
+
+            with self.subTest(kind=kind), \
+                    patch.dict(os.environ, {"LIVE_DEDICATED": "dedicated-test"}), \
+                    patch.object(adapter, "request", side_effect=exchange):
+                result = adapter.run_case(f"live.ca.local-{kind}", self.mutation_config(), "live")
+                self.assertEqual(store[SID], changed)
+                self.assertEqual(result["status"], "FAIL")
+                self.assertFalse(result["evidence"]["cleanup_verified"])
+                self.assertIn("operator recovery required", result["observed"])
+
+    def test_acknowledged_mutation_can_verify_cleanup_after_readback_timeout(self):
+        for kind, collection, original in [
+                ("risk", "risks", "low"), ("tag", "tags", "finance")]:
+            snapshot = (200, {collection: {SID: original}})
+            sequence = [snapshot, (200, allowed()), (200, {}), adapter.NetworkFailure("timeout"),
+                        (200, {}), snapshot]
+            with self.subTest(kind=kind), \
+                    patch.dict(os.environ, {"LIVE_DEDICATED": "dedicated-test"}), \
+                    patch.object(adapter, "request", side_effect=sequence):
+                result = adapter.run_case(f"live.ca.local-{kind}", self.mutation_config(), "live")
+                self.assertEqual(result["status"], "FAIL")
+                self.assertTrue(result["evidence"]["cleanup_verified"])
 
     def test_cleanup_failure_overrides_success(self):
         config = self.mutation_config()

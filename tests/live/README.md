@@ -171,6 +171,13 @@ back and compares the **entire** snapshot. A restored allowed read is required
 for PASS. Cleanup failure or concurrent store drift produces FAIL, overriding
 any earlier success. Unrelated entries are never overwritten to conceal drift.
 
+If the original mutation times out or is not acknowledged with HTTP 200,
+restoration is still attempted, but `cleanup_verified` remains false and the
+case requires operator recovery. A server-side write can finish after both
+restoration and its readback; a matching snapshot alone cannot prove cleanup
+in this case. Recover the dedicated fixture through its approved operational
+procedure before retrying.
+
 Risk/tag writes here affect only the local sidecar store, not Entra risk,
 Graph tags or token caches. No Graph `confirmSafe` operation exists in this
 adapter. If the live policy does not block these local signals, the case fails

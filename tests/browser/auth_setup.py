@@ -83,6 +83,15 @@ def main(argv=None):
         return 2
     status_path = args.status_output or (
         Path(__file__).resolve().parent / "artifacts" / f"capture-{args.portal}-{args.role}-{os.getpid()}.json")
+    path = AUTH_DIR / f"{args.portal}-{args.role}.json"
+    try:
+        for protected in (args.config, path):
+            if status_path.resolve() == protected.resolve() or (
+                    status_path.exists() and protected.exists() and status_path.samefile(protected)):
+                raise ValueError("capture status aliases a protected file")
+    except (OSError, ValueError):
+        print("BLOCKED: status output must be distinct from the configuration and session files.")
+        return 2
     blocked_details = []
     stage = "opening_browser"
 
@@ -146,7 +155,6 @@ def main(argv=None):
                         raise ValueError("symlink auth directory")
                     AUTH_DIR.mkdir(mode=0o700, exist_ok=True)
                     os.chmod(AUTH_DIR, 0o700)
-                    path = AUTH_DIR / f"{args.portal}-{args.role}.json"
                     write_private_json(path, session)
                     status("CAPTURED")
                     print(f"Captured private {args.portal}/{args.role} session in tests/browser/.auth/.")

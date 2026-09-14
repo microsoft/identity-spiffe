@@ -197,6 +197,9 @@ hostnames/reasons, never URL queries, fragments, credentials, or tokens. Use
 `--status-output PATH` for a known report path; the default is a process-specific
 file under `artifacts/`. Browser sign-in alone is not proof the capture succeeded:
 the report must say `CAPTURED` and the session must pass subsequent server checks.
+The status path must not alias the input configuration or the session destination,
+even through normalized paths or hard links. Collisions are blocked before any
+status write or browser launch, preserving existing files.
 
 Human sign-in uses normal Chromium redirects, with every hop restricted to the
 configured portal plus the explicit HTTPS origins `login.microsoftonline.com`,
