@@ -52,6 +52,13 @@ def allowed():
         "entra_token": {"present": True, "oid": "report-oid", "audience": "api://backend"}}}}
 
 
+def a2a_allowed(oid="report-oid"):
+    return {"status": "ok", "enforcement": {
+        "jwt_validated": True, "jwt_oid": oid, "tag_match": True,
+        "caller_tag": "Finance", "target_tag": "finance",
+    }}
+
+
 OBSERVATION_START = 1_789_164_000.0
 OBSERVATION_END = OBSERVATION_START + 10
 
@@ -152,15 +159,23 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(result["status"], "FAIL")
 
     def test_rbac_requires_correlated_audit_not_generic_403(self):
+        config = copy.deepcopy(CONFIG)
+        config["live"]["exclusive_observation"] = True
+        control = [(200, {"entries": [ANCHOR]}), (200, allowed()),
+                   (200, {"entries": [ANCHOR, audit_event()]})]
         deny = {"http_status": 403, "response": {"error": "forbidden", "request_id": "r1"}}
         event = {"request_id": "r1", "caller_spiffe_id": SID, "method": "GET",
                  "path": "/budget/submit", "decision": "deny", "enforcement_layer": "rbac"}
-        with patch.object(adapter, "request", side_effect=[(200, deny), (200, {"entries": [event]})]):
-            result = adapter.run_case("live.rbac.report.get-submit.deny", CONFIG, "live")
+        with patch.object(adapter, "request", side_effect=control + [
+                (200, deny), (200, {"entries": [event]})]), \
+                patch.object(adapter.time, "time", side_effect=[OBSERVATION_START, OBSERVATION_END]):
+            result = adapter.run_case("live.rbac.report.get-submit.deny", config, "live")
         self.assertEqual(result["status"], "PASS")
         event["enforcement_layer"] = "conditional_access"
-        with patch.object(adapter, "request", side_effect=[(200, deny), (200, {"entries": [event]})]):
-            result = adapter.run_case("live.rbac.report.get-submit.deny", CONFIG, "live")
+        with patch.object(adapter, "request", side_effect=control + [
+                (200, deny), (200, {"entries": [event]})]), \
+                patch.object(adapter.time, "time", side_effect=[OBSERVATION_START, OBSERVATION_END]):
+            result = adapter.run_case("live.rbac.report.get-submit.deny", config, "live")
         self.assertNotEqual(result["status"], "PASS")
 
     def test_oauth_echo_alone_not_validation(self):
@@ -168,16 +183,24 @@ class LiveTests(unittest.TestCase):
         self.assertNotEqual(result["status"], "PASS")
 
     def test_a2a_missing_token_safe_target_only(self):
-        result, request = self.run_case("live.a2a.approval.missing-token",
-                                       (401, {"error": "missing_token", "enforcement_layer": "jwt"}))
+        config = copy.deepcopy(CONFIG)
+        config["live"]["a2a_controls"] = {"budget-approval": "budget-report"}
+        with patch.object(adapter, "request", side_effect=[
+                (200, a2a_allowed()),
+                (401, {"error": "missing_token", "enforcement_layer": "jwt"})]) as request:
+            result = adapter.run_case("live.a2a.approval.missing-token", config, "live")
         self.assertEqual(result["status"], "PASS")
+        self.assertEqual(request.call_count, 2)
         args = request.call_args.args
         self.assertEqual(args[0], "GET")
         self.assertTrue(args[1].endswith("/a2a/status"))
         self.assertNotIn("Authorization", args[2])
 
     def test_a2a_generic_401_not_denial_proof(self):
-        result, _ = self.run_case("live.a2a.approval.missing-token", (401, {}))
+        config = copy.deepcopy(CONFIG)
+        config["live"]["a2a_controls"] = {"budget-approval": "budget-report"}
+        with patch.object(adapter, "request", side_effect=[(200, a2a_allowed()), (401, {})]):
+            result = adapter.run_case("live.a2a.approval.missing-token", config, "live")
         self.assertEqual(result["status"], "FAIL")
 
     def test_a2a_valid_requires_jwt_identity_and_tag(self):
@@ -428,13 +451,15 @@ class LiveTests(unittest.TestCase):
 
     def test_a2a_missing_graph_tag_not_denial_proof(self):
         config = copy.deepcopy(CONFIG)
+        config["live"]["a2a_controls"] = {"budget-approval": "budget-report"}
         config["live"]["identities"]["employee-menus"] = dict(IDENTITY)
         for missing in ["", None]:
             body = {"error": "agent_tag_mismatch", "enforcement_layer": "conditional_access",
                     "caller_tag": missing, "target_tag": "finance",
                     "enforcement": {"jwt_validated": True, "jwt_oid": "report-oid",
                                     "tag_match": False}}
-            result, _ = self.run_case("live.a2a.menus-to-approval.deny", (403, body), config)
+            with patch.object(adapter, "request", side_effect=[(200, a2a_allowed()), (403, body)]):
+                result = adapter.run_case("live.a2a.menus-to-approval.deny", config, "live")
             self.assertEqual(result["status"], "FAIL")
 
     def test_a2a_tag_denial_rejects_whitespace_only_tags(self):

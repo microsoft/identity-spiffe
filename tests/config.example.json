@@ -53,6 +53,9 @@
         "invalid_token_env": "LIVE_INVALID_MENUS_TOKEN"
       }
     },
+    "a2a_controls": {
+      "budget-approval": "budget-report"
+    },
     "admin_key_env": "LIVE_ADMIN_KEY",
     "timeout_seconds": 20,
     "exclusive_observation": false,

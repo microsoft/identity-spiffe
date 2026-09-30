@@ -28,6 +28,7 @@ Merge [config.example.json](config.example.json) into your parent configuration.
 | --- | --- |
 | `endpoints` | Map of named base URLs; no queries, fragments, userinfo or percent-encoded paths |
 | `identities` | Map of designated test identities described below |
+| `a2a_controls` | Map of A2A target endpoint names to allowed identity fixture names in `identities` |
 | `admin_key_env` | Environment variable **name**, not a secret value |
 | `timeout_seconds` | Number from 1 to 60; default 20 per HTTP exchange |
 | `exclusive_observation` | Explicit `true` only for quiescent single-caller JWT audit tests |
@@ -83,6 +84,20 @@ provided negative token fixture used only against the target JWT guard.
 Missing/expired valid credentials must be corrected through the normal
 authentication flow. Never copy token values into JSON or report artifacts.
 
+Every A2A negative case requires an explicit healthy control for its target.
+For example, `"a2a_controls": {"budget-approval": "budget-report"}` reuses the
+configured report identity and `token_env` for a fresh allowed request to the
+approval target. Add mappings for `budget-report` and `employee-menus` only when
+legitimate allowed fixtures for those targets exist. A control fixture needs
+the same identity fields above and a supplied `token_env` valid for that exact
+target. It does not need an endpoint of its own: requests always use the
+negative case's target endpoint, never the identity fixture name as a URL.
+Use separately named identity fixtures when different targets require different
+tokens for the same caller. Tag-deny probes retain their original caller's
+`token_env`; their control must use an identity whose tags actually allow access
+to that target. Do not substitute a token for another audience, an arbitrary
+endpoint or an unauthenticated health check.
+
 ## Matrix and evidence boundaries
 
 The inventory is a bounded 29-case matrix. Every selected descriptor appears
@@ -109,8 +124,15 @@ no tokens, identity values, URLs, response bodies or exception messages.
   responses do not carry a request ID. Clocks must be synchronized; stale,
   future-dated, malformed, ambiguous or unavailable audit evidence cannot pass.
 - A read-only `GET /budget/submit` probe checks report wrong-method RBAC denial.
-  It requires 403 `forbidden` and exact response/audit request-ID correlation
-  with caller, path, method, deny decision and `rbac` layer.
+  Before the negative request, it requires a fresh full-identity
+  `GET /budget/read` control through the same configured budget-report raw
+  caller, backend and sidecar stack, with the OAuth-valid audit checks above.
+  Thus `exclusive_observation`, management audit access and an authenticated
+  report fixture are prerequisites even if another matrix read row passed.
+  The allowed read path is necessary because the report's `GET /budget/submit`
+  is deliberately forbidden; no business POST is used as a control.
+  The negative requires 403 `forbidden` and exact response/audit request-ID
+  correlation with caller, path, method, deny decision and `rbac` layer.
 - Seeded report-deny/approval-allow **POST submit** descriptors remain BLOCKED:
   the real API has no snapshot/delete/rollback contract. Even a nominal denial
   test might execute business work if authorization regresses. This adapter
@@ -122,9 +144,21 @@ no tokens, identity values, URLs, response bodies or exception messages.
   coverage for the missing transport telemetry boundary.
 - A2A cases call `/a2a/status` **directly**, not the unauthenticated
   `/call-agent`, `/call-approval` or `/call-backend` invocation handlers.
-  Anonymous missing-token probes stop at the JWT guard before privileged
-  downstream work. Negative-token probes require exact `invalid_token`/`jwt`
-  responses. Allowed A2A requires target JWT validation, matching configured
+  Every missing-token, invalid-token and tag-deny case first executes a healthy
+  authenticated control on the **same target and exact GET `/a2a/status` path**.
+  The control must return 200 `ok`, validated JWT for the mapped fixture's exact
+  OID and nonempty matching tags; a 401/403, generic health response or another
+  target's success cannot satisfy it. Controls run anew in each case before
+  its negative probe; earlier allowance rows are not cached or prerequisites
+  supplied by the runner. Missing control mappings, identities or supplied
+  credentials yield BLOCKED without requests. A configured control's failed
+  response or network exchange yields FAIL and prevents the negative request.
+  Missing negative credentials likewise block before control dispatch.
+  Anonymous missing-token probes then stop at the JWT guard before privileged
+  downstream work; they are not independently passing unauthenticated guards.
+  Negative-token probes require exact `invalid_token`/`jwt` responses.
+  Successful negative rows include `healthy_control_verified: true` in safe
+  evidence. Allowed A2A requires target JWT validation, matching configured
   OID, a claimed tag match, and nonempty string `caller_tag`/`target_tag` values
   in the enforcement object that actually match case-insensitively. Empty or
   whitespace-only tags never prove allowance. Tag-deny cases require JWT

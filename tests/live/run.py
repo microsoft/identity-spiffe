@@ -44,7 +44,7 @@ def descriptors():
         descriptor("live.transport.menus.deny", "transport", "Seeded employee-menus transport rejection",
                    "Explicit transport authorization evidence, never an outage"),
         descriptor("live.rbac.report.get-submit.deny", "rbac", "Read-only wrong-method probe of submit path",
-                   "403 forbidden correlated to RBAC audit request ID"),
+                   "Healthy same-caller JWT-audited read, then 403 correlated to RBAC audit request ID"),
         descriptor("live.rbac.report.submit.deny", "rbac", "Seeded report POST submit denial",
                    "403 RBAC denial; requires safely reversible business fixture", True),
         descriptor("live.rbac.approval.submit.allow", "rbac", "Seeded approval POST submit allowance",
@@ -53,14 +53,14 @@ def descriptors():
     for target in ("report", "approval", "menus"):
         for token in ("missing-token", "invalid-token"):
             cases.append(descriptor(f"live.a2a.{target}.{token}", "oauth",
-                                    f"Direct budget/employee {target} A2A JWT guard",
-                                    f"401 JWT {token.replace('-', '_')}"))
+                                    f"Direct budget/employee {target} A2A JWT enforcement",
+                                    f"Healthy authenticated same-target control, then 401 JWT {token.replace('-', '_')}"))
     for name, expectation in (("report-to-approval", "allow"),
                               ("menus-to-approval", "deny"), ("report-to-menus", "deny")):
         cases.append(descriptor(f"live.a2a.{name}.{expectation}", "a2a",
                                 "Direct target with explicitly supplied workload token",
                                 "Validated JWT identity and matching tag" if expectation == "allow"
-                                else "Validated JWT identity and nonempty unequal tags"))
+                                else "Healthy authenticated same-target control, then validated JWT identity and nonempty unequal tags"))
     for kind in ("dynamic", "federated"):
         for layer in ("transport", "identity", "oauth"):
             cases.append(descriptor(f"live.{kind}.{layer}", layer,
@@ -120,7 +120,7 @@ def settings(config):
         raise Requirement("Provide explicit config.live endpoints and test identities")
     live = config["live"]
     permitted = {"endpoints", "identities", "admin_key_env", "mutations", "timeout_seconds",
-                 "exclusive_observation"}
+                 "exclusive_observation", "a2a_controls"}
     if set(live) - permitted:
         raise Requirement("Unknown live configuration field; inline credentials are not accepted")
     for section in ("endpoints", "identities"):
@@ -317,6 +317,10 @@ def read_case(live, caller, layer):
 
 def rbac_deny(live):
     item = identity(live, "budget-report")
+    endpoint(live, "budget-report")
+    endpoint(live, "management")
+    admin(live)
+    read_case(live, "budget-report", "oauth")
     data = raw_call(live, "budget-report", "/budget/submit")
     body = inner(data)
     if data["http_status"] != 403 or body.get("error") != "forbidden" or not body.get("request_id"):
@@ -330,7 +334,16 @@ def rbac_deny(live):
             or row.get("decision") != "deny" or row.get("method") != "GET"
             or row.get("path") != "/budget/submit"):
         raise CheckFailure("Correlated audit does not prove the expected RBAC denial")
-    return {"audit_correlated": True, "enforcement_layer": "rbac"}
+    return {"healthy_control_verified": True, "audit_correlated": True, "enforcement_layer": "rbac"}
+
+
+def a2a_control(live, target):
+    controls = live.get("a2a_controls")
+    if not isinstance(controls, dict) or not isinstance(controls.get(target), str):
+        raise Requirement("Provide a2a_controls target-to-identity mapping for a healthy authenticated control")
+    item = identity(live, controls[target])
+    headers = {"Authorization": "Bearer " + credential(item.get("token_env"))}
+    a2a_request(live, target, item, headers, "allow")
 
 
 def a2a(live, case_id):
@@ -342,14 +355,24 @@ def a2a(live, case_id):
         if outcome == "invalid-token":
             item = identity(live, target)
             headers["Authorization"] = "Bearer " + credential(item.get("invalid_token_env"))
+        a2a_control(live, target)
         status, body = call(live, "GET", endpoint(live, target) + "/a2a/status", headers)
         expected_error = outcome.replace("-", "_")
         if status != 401 or body.get("error") != expected_error or body.get("enforcement_layer") != "jwt":
             raise CheckFailure("Target did not provide the expected JWT authentication denial")
-        return {"enforcement_layer": "jwt", "http_status": status}
+        return {"healthy_control_verified": True, "enforcement_layer": "jwt", "http_status": status}
     caller, target = (ALIASES[x] for x in name.split("-to-"))
     item = identity(live, caller)
     headers = {"Authorization": "Bearer " + credential(item.get("token_env"))}
+    if outcome == "deny":
+        a2a_control(live, target)
+    evidence = a2a_request(live, target, item, headers, outcome)
+    if outcome == "deny":
+        evidence["healthy_control_verified"] = True
+    return evidence
+
+
+def a2a_request(live, target, item, headers, outcome):
     status, body = call(live, "GET", endpoint(live, target) + "/a2a/status", headers)
     enforcement = body.get("enforcement")
     if (not isinstance(enforcement, dict) or enforcement.get("jwt_validated") is not True
