@@ -365,8 +365,8 @@ def a2a(live, case_id):
     elif (status != 403 or body.get("error") != "agent_tag_mismatch"
           or body.get("enforcement_layer") != "conditional_access"
           or enforcement.get("tag_match") is not False
-          or not body.get("caller_tag") or not body.get("target_tag")
-          or not isinstance(body["caller_tag"], str) or not isinstance(body["target_tag"], str)
+          or not isinstance(body.get("caller_tag"), str) or not isinstance(body.get("target_tag"), str)
+          or not body["caller_tag"].strip() or not body["target_tag"].strip()
           or body["caller_tag"].lower() == body["target_tag"].lower()):
         raise CheckFailure("Missing configured tag mismatch; missing Graph data is not proof")
     return {"jwt_validated": True, "tag_match": outcome == "allow", "http_status": status}

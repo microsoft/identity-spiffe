@@ -437,6 +437,70 @@ class LiveTests(unittest.TestCase):
             result, _ = self.run_case("live.a2a.menus-to-approval.deny", (403, body), config)
             self.assertEqual(result["status"], "FAIL")
 
+    def test_a2a_tag_denial_rejects_whitespace_only_tags(self):
+        for field in ("caller_tag", "target_tag"):
+            for tag in ("   ", "\t\r\n", "\v\f", "\u00a0"):
+                with self.subTest(field=field, tag=tag):
+                    body = {"error": "agent_tag_mismatch", "enforcement_layer": "conditional_access",
+                            "caller_tag": "Engineering", "target_tag": "Finance",
+                            "enforcement": {"jwt_validated": True, "jwt_oid": "report-oid",
+                                            "tag_match": False}}
+                    body[field] = tag
+                    result, _ = self.run_case("live.a2a.report-to-menus.deny", (403, body))
+                    self.assertEqual(result["status"], "FAIL")
+                    self.assertEqual(result["observed"],
+                                     "Missing configured tag mismatch; missing Graph data is not proof")
+
+    def test_a2a_tag_denial_rejects_missing_empty_and_non_string_tags(self):
+        for field in ("caller_tag", "target_tag"):
+            for tag in ("", None, 0, 3, False, True, [], ["Finance"], {}, {"tag": "Finance"}):
+                with self.subTest(field=field, tag=tag):
+                    body = {"error": "agent_tag_mismatch", "enforcement_layer": "conditional_access",
+                            "caller_tag": "Engineering", "target_tag": "Finance",
+                            "enforcement": {"jwt_validated": True, "jwt_oid": "report-oid",
+                                            "tag_match": False}}
+                    body[field] = tag
+                    result, _ = self.run_case("live.a2a.report-to-menus.deny", (403, body))
+                    self.assertEqual(result["status"], "FAIL")
+            with self.subTest(missing=field):
+                body = {"error": "agent_tag_mismatch", "enforcement_layer": "conditional_access",
+                        "caller_tag": "Engineering", "target_tag": "Finance",
+                        "enforcement": {"jwt_validated": True, "jwt_oid": "report-oid",
+                                        "tag_match": False}}
+                del body[field]
+                result, _ = self.run_case("live.a2a.report-to-menus.deny", (403, body))
+                self.assertEqual(result["status"], "FAIL")
+
+    def test_a2a_tag_denial_preserves_backend_comparison(self):
+        for caller, target, expected in [
+                ("Engineering", "Finance", "PASS"),
+                ("Finance ", "finance", "PASS"), ("finance", " Finance", "PASS"),
+                ("Finance", "finance", "FAIL")]:
+            with self.subTest(caller=caller, target=target):
+                body = {"error": "agent_tag_mismatch", "enforcement_layer": "conditional_access",
+                        "caller_tag": caller, "target_tag": target,
+                        "enforcement": {"jwt_validated": True, "jwt_oid": "report-oid",
+                                        "tag_match": False}}
+                result, _ = self.run_case("live.a2a.report-to-menus.deny", (403, body))
+                self.assertEqual(result["status"], expected)
+                if expected == "PASS":
+                    self.assertTrue(result["evidence"]["jwt_validated"])
+                    self.assertFalse(result["evidence"]["tag_match"])
+
+    def test_a2a_tag_match_control_preserves_backend_comparison(self):
+        for caller, target, expected in [
+                ("Finance", "finance", "PASS"), (" Finance ", " finance ", "PASS"),
+                ("Finance ", "finance", "FAIL"), ("finance", " Finance", "FAIL")]:
+            with self.subTest(caller=caller, target=target):
+                body = {"status": "ok", "enforcement": {"jwt_validated": True,
+                        "jwt_oid": "report-oid", "tag_match": True,
+                        "caller_tag": caller, "target_tag": target}}
+                result, _ = self.run_case("live.a2a.report-to-approval.allow", (200, body))
+                self.assertEqual(result["status"], expected)
+                if expected == "PASS":
+                    self.assertTrue(result["evidence"]["jwt_validated"])
+                    self.assertTrue(result["evidence"]["tag_match"])
+
     def test_dynamic_and_federated_explicit_fixture_identity(self):
         for kind in ["dynamic", "federated"]:
             config = copy.deepcopy(CONFIG)

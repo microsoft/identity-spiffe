@@ -127,8 +127,11 @@ no tokens, identity values, URLs, response bodies or exception messages.
   responses. Allowed A2A requires target JWT validation, matching configured
   OID, a claimed tag match, and nonempty string `caller_tag`/`target_tag` values
   in the enforcement object that actually match case-insensitively. Empty or
-  whitespace-only tags never prove allowance. Tag-deny cases require JWT validation, matching OID and
-  nonempty unequal tags; missing Graph tags are not proof of policy enforcement.
+  whitespace-only tags never prove allowance. Tag-deny cases require JWT
+  validation, matching OID and string tags containing non-whitespace content
+  that differ case-insensitively. Missing, null, non-string, empty or
+  whitespace-only tags are not proof of policy enforcement. Presence checks
+  do not trim tags for comparison; the backend compares their lowercase values.
 - Dynamic/federated descriptors use the same transport/identity/JWT evidence
   against **already existing** compatible fixtures. They do not establish
   provider-specific token exchange, federation setup or provisioning.
