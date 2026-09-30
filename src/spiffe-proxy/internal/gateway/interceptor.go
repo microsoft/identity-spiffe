@@ -1,7 +1,7 @@
 // Package gateway integrates the RBAC engine, HTTP inspection, structured logging,
 // and management API into the existing tunnel ingress proxy.
 //
-// It intercepts the first data payload in the gRPC tunnel, parses the HTTP request,
+// It intercepts the parsed HTTP request in the gRPC tunnel,
 // evaluates RBAC policy, injects caller context headers if allowed, and either
 // forwards the modified request to the application or returns HTTP 403.
 package gateway
@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -38,24 +39,16 @@ func NewInterceptor(engine *rbac.Engine, logger *logging.AccessLogger) *Intercep
 type InterceptResult struct {
 	// Allowed indicates whether the request should be forwarded.
 	Allowed bool
-	// ModifiedPayload is the payload to forward (with injected headers) if allowed.
-	ModifiedPayload []byte
 	// DenyResponse is the HTTP 403 response to send back through the tunnel if denied.
 	DenyResponse []byte
 	// RequestID is the unique ID assigned to this request for correlation.
 	RequestID string
-	// RemainingBodyBytes is the number of request body bytes still expected after
-	// this payload. When > 0, the tunnel server should allow additional DATA payloads
-	// until the full body is received, then activate anti-smuggling protection.
-	// A value of -1 means Content-Length was not specified (should not happen for
-	// well-formed PUT/POST from httpx, but if so we conservatively allow body data
-	// up to a maximum limit).
-	RemainingBodyBytes int64
 }
 
-// Process evaluates the first data payload from the tunnel.
+// Process evaluates a parsed request and injects authenticated headers if allowed.
+// A nil request records a fail-closed HTTP parsing denial.
 // callerSpiffeID is extracted from the mTLS peer certificate.
-func (i *Interceptor) Process(callerSpiffeID string, payload []byte) InterceptResult {
+func (i *Interceptor) Process(callerSpiffeID string, req *http.Request) InterceptResult {
 	start := time.Now()
 	requestID := fmt.Sprintf("req-%s", uuid.New().String()[:8])
 
@@ -69,11 +62,8 @@ func (i *Interceptor) Process(callerSpiffeID string, payload []byte) InterceptRe
 		callerID.EntraAgentID = cp.EntraAgentID
 	}
 
-	// Step 1: Parse HTTP request from tunnel payload.
-	reqInfo, err := inspect.ParseHTTPRequest(payload)
-	if err != nil {
+	if req == nil {
 		// If we can't parse HTTP, we can't evaluate RBAC. Deny.
-		log.Printf("[Gateway] Failed to parse HTTP from tunnel payload: %v", err)
 		i.logEntryWithJWT(callerID, "UNKNOWN", "UNKNOWN", "deny", rbac.Decision{
 			Action: rbac.ActionDeny, Reason: "parse_error", EnforcementLayer: rbac.LayerRBAC,
 		}, requestID, start)
@@ -87,21 +77,22 @@ func (i *Interceptor) Process(callerSpiffeID string, payload []byte) InterceptRe
 	// Extract Bearer token from Authorization header for Layer 3 (OAuth/JWT).
 	// Parse case-insensitively and trim whitespace per RFC 6750.
 	bearerToken := ""
-	if len(reqInfo.Authorization) > 7 && strings.EqualFold(reqInfo.Authorization[:7], "Bearer ") {
-		bearerToken = strings.TrimSpace(reqInfo.Authorization[7:])
+	authorization := req.Header.Get("Authorization")
+	if len(authorization) > 7 && strings.EqualFold(authorization[:7], "Bearer ") {
+		bearerToken = strings.TrimSpace(authorization[7:])
 	}
 
-	log.Printf("[Gateway] Request: %s %s from %s (jwt_present: %v)", reqInfo.Method, reqInfo.Path, callerSpiffeID, bearerToken != "")
+	log.Printf("[Gateway] Request: %s %s from %s (jwt_present: %v)", req.Method, req.URL.Path, callerSpiffeID, bearerToken != "")
 
 	// Step 2: RBAC + JWT evaluation (Layers 2 and 3).
-	decision := i.engine.Evaluate(callerSpiffeID, reqInfo.Method, reqInfo.Path, bearerToken)
+	decision := i.engine.Evaluate(callerSpiffeID, req.Method, req.URL.Path, bearerToken)
 
 	if decision.Action == rbac.ActionDeny {
 		log.Printf("[Gateway] ❌ DENIED: %s %s from %s (reason: %s, layer: %s)",
-			reqInfo.Method, reqInfo.Path, callerSpiffeID, decision.Reason, decision.EnforcementLayer)
-		i.logEntryWithJWT(callerID, reqInfo.Method, reqInfo.Path, "deny", decision, requestID, start)
+			req.Method, req.URL.Path, callerSpiffeID, decision.Reason, decision.EnforcementLayer)
+		i.logEntryWithJWT(callerID, req.Method, req.URL.Path, "deny", decision, requestID, start)
 
-		denyResp := i.buildDenyResponseFromDecision(decision, requestID, callerSpiffeID, reqInfo.Method, reqInfo.Path)
+		denyResp := i.buildDenyResponseFromDecision(decision, requestID, callerSpiffeID, req.Method, req.URL.Path)
 		return InterceptResult{
 			Allowed:      false,
 			DenyResponse: denyResp,
@@ -110,52 +101,14 @@ func (i *Interceptor) Process(callerSpiffeID string, payload []byte) InterceptRe
 	}
 
 	// Step 3: Inject caller context headers (SPIFFE + Entra).
-	modified, err := inspect.InjectHeaders(payload, callerID)
-	if err != nil {
-		// Header injection failed — deny the request rather than forwarding with
-		// potentially spoofable caller-identity headers intact.
-		log.Printf("[Gateway] Error: header injection failed, denying request: %v", err)
-		denyDecision := decision
-		denyDecision.Action = rbac.ActionDeny
-		denyDecision.Reason = "header_injection_failed"
-		// Keep original EnforcementLayer — this denial is distinguished via
-		// Reason rather than being misattributed to RBAC.
-		i.logEntryWithJWT(callerID, reqInfo.Method, reqInfo.Path, "deny", denyDecision, requestID, start)
-		return InterceptResult{
-			Allowed:      false,
-			DenyResponse: inspect.BuildDenyResponse(requestID, callerSpiffeID, reqInfo.Method, reqInfo.Path),
-			RequestID:    requestID,
-		}
-	}
-
-	// Step 5: Calculate remaining body bytes for anti-smuggling.
-	// The first payload may contain part of the body. We need to tell the tunnel
-	// server how many more bytes to expect before activating anti-smuggling.
-	var remainingBody int64
-	if reqInfo.ContentLength > 0 {
-		bodyInFirstPayload := int64(len(payload) - reqInfo.HeaderEndPos)
-		if bodyInFirstPayload < 0 {
-			bodyInFirstPayload = 0
-		}
-		remainingBody = reqInfo.ContentLength - bodyInFirstPayload
-		if remainingBody < 0 {
-			remainingBody = 0
-		}
-	} else if reqInfo.ContentLength == -1 {
-		// No Content-Length header. Conservatively allow up to 1MB of body.
-		remainingBody = 1 << 20
-	}
-	// ContentLength == 0 means no body expected — remainingBody stays 0.
-
-	log.Printf("[Gateway] ✓ ALLOWED: %s %s from %s (reason: %s, layer: %s, remaining_body: %d)",
-		reqInfo.Method, reqInfo.Path, callerSpiffeID, decision.Reason, decision.EnforcementLayer, remainingBody)
-	i.logEntryWithJWT(callerID, reqInfo.Method, reqInfo.Path, "allow", decision, requestID, start)
+	inspect.InjectHeaders(req, callerID)
+	log.Printf("[Gateway] ✓ ALLOWED: %s %s from %s (reason: %s, layer: %s)",
+		req.Method, req.URL.Path, callerSpiffeID, decision.Reason, decision.EnforcementLayer)
+	i.logEntryWithJWT(callerID, req.Method, req.URL.Path, "allow", decision, requestID, start)
 
 	return InterceptResult{
-		Allowed:            true,
-		ModifiedPayload:    modified,
-		RequestID:          requestID,
-		RemainingBodyBytes: remainingBody,
+		Allowed:   true,
+		RequestID: requestID,
 	}
 }
 

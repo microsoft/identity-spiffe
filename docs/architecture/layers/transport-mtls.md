@@ -45,6 +45,31 @@ Layer 1 provides three important properties:
 - Join-token attestation means a new agent revision needs fresh bootstrap unless the token path is repaired.
 - `./deploy.sh --portal-only` is safe because it skips agent sidecars entirely.
 
+## Governed HTTP Tunnel Contract
+
+When the ingress gateway interceptor is enabled, each gRPC stream carries
+**one authorized HTTP request and its response**, not a reusable HTTP connection.
+The mTLS gRPC connection can multiplex separate streams; callers must open a new
+local connection/stream for each request.
+
+Ingress uses Go's `net/http` parser and serializer, not DATA-frame lengths, to
+define request boundaries. Headers may span frames and are bounded to 64 KiB.
+Content-Length and chunked bodies stream without whole-body buffering, including
+large bodies and chunk trailers. Only the first request's framed body reaches
+the backend; appended requests in the same frame or later frames are not
+forwarded. Authenticated identity headers replace caller-supplied values, while
+the control-plane `X-Spiffe-Admin-Key` credential remains intact.
+
+Ingress forwards `Connection: close` to the backend so the authorized response
+finishes the stream even when the caller requested keep-alive. HTTP pipelining,
+keep-alive reuse and upgraded bidirectional protocols are not supported in a
+governed stream. Malformed/incomplete headers fail closed with a gateway denial;
+malformed/incomplete bodies terminate forwarding with an error. A backend may
+receive an authorized partial body before a streaming error, but never an
+unframed second request. The existing five-minute backend deadline also bounds
+stalled requests. Without a gateway interceptor, the legacy raw TCP tunnel
+remains available; it does not provide HTTP request authorization.
+
 ## Related Reading
 
 - [System Overview](../system-overview.md)

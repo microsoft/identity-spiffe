@@ -189,7 +189,17 @@ func TestTunnel(t *testing.T) {
 				t.Fatal("expected real backend response")
 			}
 			if name == "second_frame" {
-				send(tunnelpb.MessageType_MESSAGE_TYPE_DATA, second)
+				// A completed one-request stream may already be closed after the
+				// first response. EOF rejects the second send; arbitrary errors do
+				// not count. Still drain the stream and assert backend dispatch below.
+				err := stream.Send(&tunnelpb.TunnelMessage{
+					ConnectionId: "fixture-connection",
+					Type:         tunnelpb.MessageType_MESSAGE_TYPE_DATA,
+					Payload:      []byte(second),
+				})
+				if err != nil && err != io.EOF {
+					t.Fatal("second request send ended in an unexpected transport error")
+				}
 			}
 			if name == "same_frame" || name == "overflow_frame" {
 				// Do not half-close early and race the backend's second request.

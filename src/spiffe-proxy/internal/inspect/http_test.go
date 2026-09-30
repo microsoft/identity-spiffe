@@ -24,12 +24,17 @@ func TestInjectHeaders_StripsSpoofableSpiffeHeadersButPreservesAdminKey(t *testi
 		RequestID:   "real-req-id",
 	}
 
-	out, err := InjectHeaders([]byte(raw), id)
+	req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
 	if err != nil {
-		t.Fatalf("InjectHeaders: %v", err)
+		t.Fatalf("parse: %v", err)
+	}
+	InjectHeaders(req, id)
+	var out bytes.Buffer
+	if err := req.Write(&out); err != nil {
+		t.Fatalf("write: %v", err)
 	}
 
-	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(out)))
+	req, err = http.ReadRequest(bufio.NewReader(&out))
 	if err != nil {
 		t.Fatalf("re-parse: %v", err)
 	}
@@ -47,7 +52,7 @@ func TestInjectHeaders_StripsSpoofableSpiffeHeadersButPreservesAdminKey(t *testi
 		t.Errorf("X-Request-ID = %q, want %q", got, id.RequestID)
 	}
 
-	if strings.Count(string(out), "X-Spiffe-Admin-Key:") != 1 {
+	if len(req.Header.Values("X-Spiffe-Admin-Key")) != 1 {
 		t.Errorf("X-Spiffe-Admin-Key must appear exactly once in serialized output")
 	}
 }
