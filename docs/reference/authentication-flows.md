@@ -31,6 +31,7 @@ Validation requirements:
 - correct Entra tenant
 - correct audience for the portal app registration
 - valid signature from Entra JWKS
+- required, non-null `exp` that passes the JWT library's expiration validation
 - caller belongs to `Agent Management Administrators` or `Agent Management Viewers`
 
 Failures are explicit:
