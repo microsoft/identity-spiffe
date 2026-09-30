@@ -169,6 +169,17 @@ code. They are intentionally **not** marked expected-failure or skipped:
 | `protocols.tunnel.same_frame` | A second HTTP request in the initial DATA frame must not reach the backend |
 | `protocols.tunnel.overflow_frame` | An oversized body continuation must not forward a second ungoverned request |
 
+The two tunnel regressions are fixed by the
+[governed one-request contract](../../docs/architecture/layers/transport-mtls.md#governed-http-tunnel-contract):
+HTTP parsing bounds the streamed body independently of DATA frames. They remain
+ordinary executable assertions, not removed cases or expected failures. The
+other four findings above remain outside this transport fix.
+The later-frame case accepts only a completed-stream EOF when attempting its
+second send: the server may already have closed after the first response.
+It still requires the complete healthy response, graceful stream termination,
+and exactly one authenticated backend dispatch; arbitrary transport errors
+cannot satisfy the rejection.
+
 These are product findings, not harness errors. Fixes require separate
 authorization; this suite does not weaken assertions or change production to
 make the matrix green. Always use the current generated report for counts,
