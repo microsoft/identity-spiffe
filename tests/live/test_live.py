@@ -462,6 +462,17 @@ class LiveTests(unittest.TestCase):
                 result = adapter.run_case("live.a2a.menus-to-approval.deny", config, "live")
             self.assertEqual(result["status"], "FAIL")
 
+    def run_tag_denial(self, body):
+        config = copy.deepcopy(CONFIG)
+        config["live"]["a2a_controls"] = {"employee-menus": "budget-report"}
+        with patch.object(adapter, "request", side_effect=[
+                (200, a2a_allowed()), (403, body)]) as request:
+            result = adapter.run_case("live.a2a.report-to-menus.deny", config, "live")
+        self.assertEqual(request.call_count, 2)
+        for exchange in request.call_args_list:
+            self.assertEqual(exchange.args[:2], ("GET", "https://menus.example/a2a/status"))
+        return result
+
     def test_a2a_tag_denial_rejects_whitespace_only_tags(self):
         for field in ("caller_tag", "target_tag"):
             for tag in ("   ", "\t\r\n", "\v\f", "\u00a0"):
@@ -471,7 +482,7 @@ class LiveTests(unittest.TestCase):
                             "enforcement": {"jwt_validated": True, "jwt_oid": "report-oid",
                                             "tag_match": False}}
                     body[field] = tag
-                    result, _ = self.run_case("live.a2a.report-to-menus.deny", (403, body))
+                    result = self.run_tag_denial(body)
                     self.assertEqual(result["status"], "FAIL")
                     self.assertEqual(result["observed"],
                                      "Missing configured tag mismatch; missing Graph data is not proof")
@@ -485,7 +496,7 @@ class LiveTests(unittest.TestCase):
                             "enforcement": {"jwt_validated": True, "jwt_oid": "report-oid",
                                             "tag_match": False}}
                     body[field] = tag
-                    result, _ = self.run_case("live.a2a.report-to-menus.deny", (403, body))
+                    result = self.run_tag_denial(body)
                     self.assertEqual(result["status"], "FAIL")
             with self.subTest(missing=field):
                 body = {"error": "agent_tag_mismatch", "enforcement_layer": "conditional_access",
@@ -493,7 +504,7 @@ class LiveTests(unittest.TestCase):
                         "enforcement": {"jwt_validated": True, "jwt_oid": "report-oid",
                                         "tag_match": False}}
                 del body[field]
-                result, _ = self.run_case("live.a2a.report-to-menus.deny", (403, body))
+                result = self.run_tag_denial(body)
                 self.assertEqual(result["status"], "FAIL")
 
     def test_a2a_tag_denial_preserves_backend_comparison(self):
@@ -506,7 +517,7 @@ class LiveTests(unittest.TestCase):
                         "caller_tag": caller, "target_tag": target,
                         "enforcement": {"jwt_validated": True, "jwt_oid": "report-oid",
                                         "tag_match": False}}
-                result, _ = self.run_case("live.a2a.report-to-menus.deny", (403, body))
+                result = self.run_tag_denial(body)
                 self.assertEqual(result["status"], expected)
                 if expected == "PASS":
                     self.assertTrue(result["evidence"]["jwt_validated"])
