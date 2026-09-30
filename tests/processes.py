@@ -144,12 +144,14 @@ def _new_scope(environment, registry_base=None):
             _assert_open(parent, root)
             scope = parent / ("scope-" + secrets.token_hex(16))
             scope.mkdir(mode=0o700)
+            _write_json(scope / ".pending", {"version": 1})
             _write_json(scope / "scope.json", {"version": 1})
             return scope
     base = BASE if registry_base is None else Path(registry_base) / "processes"
     _base_directory(base, create=True)
     scope = base / ("scope-" + secrets.token_hex(16))
     scope.mkdir(mode=0o700)
+    _write_json(scope / ".pending", {"version": 1})
     _write_json(scope / "scope.json", {"version": 1})
     os.close(_open_file(scope / ".lock", os.O_CREAT | os.O_EXCL | os.O_RDWR))
     return scope
@@ -211,6 +213,11 @@ def _register_and_exec(scope, ready_fd, command):
         pid = os.getpid()
         if os.getpgrp() != pid:
             raise ProcessLaunchError("Supervisor must own its process group")
+        if _read_json(scope / ".pending") != {"version": 1}:
+            raise ProcessLaunchError("Invalid pending process registration")
+        # Once consumed, missing process.json means interrupted registration,
+        # not an empty scope: guardian creation may already have happened.
+        (scope / ".pending").unlink()
         guardian = _guardian()
         table = _table()
         _write_json(scope / "process.json", {
@@ -247,25 +254,51 @@ def _read_registration(fd):
 
 def _records(scope):
     records = []
+    errors = []
+    _private_directory(scope)
+    if _read_json(scope / "scope.json") != {"version": 1}:
+        raise ProcessCleanupError("Invalid process registry metadata")
+    invalid_content = False
     for path in scope.iterdir():
         if SCOPE_NAME.fullmatch(path.name):
-            _private_directory(path)
-            if _read_json(path / "scope.json") != {"version": 1}:
-                raise ProcessCleanupError("Invalid nested registry scope")
-            records.extend(_records(path))
-        elif path.name not in {"scope.json", "process.json", ".closing", ".lock"}:
-            raise ProcessCleanupError("Unexpected process registry content")
+            try:
+                nested_records, nested_errors = _records(path)
+                records.extend(nested_records)
+                errors.extend(nested_errors)
+            except (ProcessCleanupError, OSError, ValueError):
+                errors.append(f"Invalid nested process registry in {path.name}")
         else:
-            fd = _open_file(path, os.O_RDONLY)
-            os.close(fd)
-    value = _read_json(scope / "process.json")
-    keys = {"pid", "pgid", "birth", "guardian_pid", "guardian_birth"}
-    if (not isinstance(value, dict) or set(value) != keys
-            or any(type(value[k]) is not int or value[k] <= 1 for k in ("pid", "pgid", "guardian_pid"))
-            or value["pid"] != value["pgid"] or value["guardian_pid"] == value["pid"]
-            or any(not isinstance(value[k], str) or not value[k] for k in ("birth", "guardian_birth"))):
-        raise ProcessCleanupError("Invalid registered process identity")
-    return records + [value]
+            try:
+                if path.name not in {"scope.json", "process.json", ".closing", ".lock", ".pending"}:
+                    raise ProcessCleanupError("Unexpected process registry content")
+                fd = _open_file(path, os.O_RDONLY)
+                os.close(fd)
+            except (ProcessCleanupError, OSError):
+                invalid_content = True
+                errors.append(f"Unsafe process registry content in {scope.name}")
+    if invalid_content:
+        return records, errors
+    try:
+        if os.path.lexists(scope / ".pending"):
+            if (_read_json(scope / ".pending") != {"version": 1}
+                    or os.path.lexists(scope / "process.json")):
+                raise ProcessCleanupError("Invalid pending process registration")
+            errors.append(f"Incomplete process registration in {scope.name} (pending)")
+            return records, errors
+        if not os.path.lexists(scope / "process.json"):
+            errors.append(f"Incomplete process registration in {scope.name} (ownership unavailable)")
+            return records, errors
+        value = _read_json(scope / "process.json")
+        keys = {"pid", "pgid", "birth", "guardian_pid", "guardian_birth"}
+        if (not isinstance(value, dict) or set(value) != keys
+                or any(type(value[k]) is not int or value[k] <= 1 for k in ("pid", "pgid", "guardian_pid"))
+                or value["pid"] != value["pgid"] or value["guardian_pid"] == value["pid"]
+                or any(not isinstance(value[k], str) or not value[k] for k in ("birth", "guardian_birth"))):
+            raise ProcessCleanupError("Invalid registered process identity")
+        records.append(value)
+    except (ProcessCleanupError, OSError, ValueError):
+        errors.append(f"Invalid process registration in {scope.name}")
+    return records, errors
 
 
 def _members(record, table):
@@ -292,10 +325,16 @@ def cleanup_scope(scope):
             marker = scope / ".closing"
             if not marker.exists():
                 os.close(_open_file(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-            records = _records(scope)
+            records, errors = _records(scope)
             table = _table()
+            verified = []
             for record in records:
-                _validate_identity(record, table)
+                try:
+                    _validate_identity(record, table)
+                    verified.append(record)
+                except ProcessCleanupError as error:
+                    errors.append(str(error))
+            records = verified
             for record in records:
                 if _members(record, table):
                     os.killpg(record["pgid"], signal.SIGTERM)
@@ -306,14 +345,24 @@ def cleanup_scope(scope):
                     break
                 time.sleep(0.02)
             table = _table()
+            verified = []
             for record in records:
-                if _validate_identity(record, table):
+                try:
+                    members = _validate_identity(record, table)
+                except ProcessCleanupError as error:
+                    errors.append(str(error))
+                    continue
+                verified.append(record)
+                if members:
                     os.killpg(record["pgid"], signal.SIGKILL)
+            records = verified
             deadline = time.monotonic() + 3
             while any(_members(r, _table()) for r in records):
                 if time.monotonic() >= deadline:
                     raise ProcessCleanupError("Registered process groups survived bounded cleanup")
                 time.sleep(0.02)
+            if errors:
+                raise ProcessCleanupError("; ".join(errors) + "; scope retained")
             shutil.rmtree(scope)
     except ProcessCleanupError:
         raise

@@ -98,6 +98,11 @@ directories and symlink paths remain invalid.
 
 Commands register their process groups before execution, including nested Go
 tools. Cleanup can therefore find descendants even after their parent exits.
+Pre-registration scopes are explicitly marked under the shared registry lock.
+An interrupted or invalid child registration does not block termination of
+independently verified groups: cleanup closes the ancestor, stops those groups,
+then reports the incomplete/unsafe state and retains its ownership evidence.
+Missing or stale ownership never authorizes signalling an unverified group.
 Private process registries are retained only if cleanup cannot be verified;
 that is a failed run requiring attention, not permission to delete arbitrary
 processes or directories.

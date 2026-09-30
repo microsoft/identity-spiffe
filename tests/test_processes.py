@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import select
 import shutil
 import signal
 import subprocess
@@ -123,6 +124,191 @@ class OwnedProcessTests(unittest.TestCase):
         finally:
             if descendant is not None and alive(descendant):
                 os.kill(descendant, signal.SIGKILL)
+
+    def test_interrupted_scope_creation_does_not_abandon_registered_groups(self):
+        ready_read, ready_write = os.pipe()
+        resume_read, resume_write = os.pipe()
+        code = (
+            "import os,sys\n"
+            f"sys.path.insert(0, {str(HERE)!r})\n"
+            "import processes\n"
+            "original=processes._new_scope\n"
+            "def pause_after_scope(*args, **kwargs):\n"
+            " scope=original(*args, **kwargs)\n"
+            f" os.write({ready_write}, (str(scope)+'\\n').encode())\n"
+            f" os.read({resume_read}, 1)\n"
+            " return scope\n"
+            f"with processes.owned_process(['sleep','30'], cwd={str(self.work)!r}):\n"
+            " processes._new_scope=pause_after_scope\n"
+            f" with processes.owned_process(['sleep','30'], cwd={str(self.work)!r}): pass\n"
+        )
+        root = pending = owner = None
+        try:
+            with self.assertRaises(self.processes.ProcessCleanupError) as failure:
+                with self.processes.owned_process(
+                    [sys.executable, "-c", code], cwd=self.work, registry_base=self.work,
+                    pass_fds=(ready_write, resume_read),
+                ) as owner:
+                    root = Path(owner.identity_process_registry)
+                    record = self.processes._read_json(root / "process.json")
+                    self.assertTrue(select.select([ready_read], [], [], 4)[0],
+                                    "nested launch did not reach the scope publication barrier")
+                    pending = Path(os.read(ready_read, 4096).decode().strip())
+                    self.assertEqual(pending.parent, root)
+                    self.assertFalse((pending / "process.json").exists(),
+                                     "barrier must precede supervisor creation/registration")
+                    sibling = next(path for path in root.iterdir()
+                                   if path.is_dir() and path != pending)
+                    sibling_record = self.processes._read_json(sibling / "process.json")
+                    owner.kill()
+                    owner.wait(timeout=2)
+            self.assertFalse(alive(record["guardian_pid"]),
+                             "incomplete child prevented cleanup of a registered guardian")
+            self.assertFalse(alive(sibling_record["pid"]))
+            self.assertFalse(alive(sibling_record["guardian_pid"]),
+                             "incomplete child prevented cleanup of its registered sibling")
+            self.assertIn("incomplete", str(failure.exception).lower())
+            self.assertTrue(root.exists(), "incomplete ownership evidence must be retained")
+            self.assertTrue((root / ".closing").exists())
+            self.assertTrue(pending.exists())
+        finally:
+            for fd in (ready_read, ready_write, resume_read, resume_write):
+                os.close(fd)
+            # The barrier proves this exact fixture scope never spawned a supervisor.
+            if pending is not None and pending.exists():
+                shutil.rmtree(pending)
+            if root is not None and root.exists():
+                self.processes.cleanup_scope(root)
+            if owner is not None:
+                owner.wait(timeout=2)
+
+    def test_cleanup_fences_a_pending_supervisor_before_registration(self):
+        with self.processes.owned_process(["sleep", "30"], cwd=self.work) as owner:
+            root = Path(owner.identity_process_registry)
+            pending = self.processes._new_scope({self.processes.REGISTRY_ENV: str(root)})
+            try:
+                with self.assertRaises(self.processes.ProcessCleanupError):
+                    self.processes.cleanup_scope(root)
+                self.assertFalse(alive(owner.pid),
+                                 "pending registration must not block registered group cleanup")
+                marker = self.work / "late-exec"
+                read_fd, write_fd = os.pipe()
+                try:
+                    with self.assertRaises(self.processes.ProcessLaunchError):
+                        self.processes._register_and_exec(
+                            pending, write_fd,
+                            [sys.executable, "-c", f"open({str(marker)!r},'w').close()"],
+                        )
+                    self.assertFalse(marker.exists(), "closing ancestor allowed late execution")
+                finally:
+                    os.close(read_fd)
+                    os.close(write_fd)
+            finally:
+                shutil.rmtree(pending)
+
+    def test_malformed_child_scope_does_not_abandon_verified_parent_group(self):
+        with self.processes.owned_process(["sleep", "30"], cwd=self.work) as owner:
+            root = Path(owner.identity_process_registry)
+            child = self.processes._new_scope({self.processes.REGISTRY_ENV: str(root)})
+            try:
+                (child / "scope.json").write_text('{"version":999}')
+                with self.assertRaises(self.processes.ProcessCleanupError):
+                    self.processes.cleanup_scope(root)
+                self.assertFalse(alive(owner.pid),
+                                 "malformed sibling must not protect a verified process group")
+                self.assertTrue(child.exists(), "malformed ownership evidence must be retained")
+            finally:
+                shutil.rmtree(child)
+
+    def test_stale_child_identity_does_not_abandon_verified_parent_group(self):
+        with self.processes.owned_process(["sleep", "30"], cwd=self.work) as owner:
+            root = Path(owner.identity_process_registry)
+            env = dict(os.environ, IDENTITY_TEST_PROCESS_REGISTRY=str(root))
+            with self.processes.owned_process(["sleep", "30"], cwd=self.work, env=env) as child:
+                scope = Path(child.identity_process_registry)
+                original = self.processes._read_json(scope / "process.json")
+                try:
+                    (scope / "process.json").write_text(
+                        json.dumps(dict(original, guardian_birth="not-the-recorded-process")))
+                    with self.assertRaises(self.processes.ProcessCleanupError):
+                        self.processes.cleanup_scope(root)
+                    self.assertFalse(alive(owner.pid))
+                    self.assertTrue(alive(child.pid), "stale identity must never authorize a signal")
+                    self.assertTrue(scope.exists())
+                finally:
+                    (scope / "process.json").write_text(json.dumps(original))
+
+    def test_interrupted_guardian_registration_preserves_unverifiable_group(self):
+        ready_read, ready_write = os.pipe()
+        resume_read, resume_write = os.pipe()
+        supervisor = pending = None
+        with self.processes.owned_process(["sleep", "30"], cwd=self.work) as owner:
+            root = Path(owner.identity_process_registry)
+            pending = self.processes._new_scope({self.processes.REGISTRY_ENV: str(root)})
+            code = (
+                "import json,os,pathlib,sys\n"
+                f"sys.path.insert(0, {str(HERE)!r})\n"
+                "import processes\n"
+                "original=processes._write_json\n"
+                "def pause_registration(path, value):\n"
+                " if path.name=='process.json':\n"
+                f"  os.write({ready_write}, (json.dumps(value)+'\\n').encode())\n"
+                f"  os.read({resume_read}, 1)\n"
+                " original(path, value)\n"
+                "processes._write_json=pause_registration\n"
+                f"processes._register_and_exec(pathlib.Path({str(pending)!r}), {ready_write}, ['sleep','30'])\n"
+            )
+            record = None
+            try:
+                supervisor = subprocess.Popen(
+                    [sys.executable, "-c", code], cwd=self.work, start_new_session=True,
+                    pass_fds=(ready_write, resume_read), stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self.assertTrue(select.select([ready_read], [], [], 4)[0],
+                                "supervisor did not reach the guardian registration barrier")
+                record = json.loads(os.read(ready_read, 4096).decode())
+                self.assertFalse((pending / "process.json").exists())
+                self.assertTrue(alive(record["guardian_pid"]))
+                supervisor.kill()
+                supervisor.wait(timeout=2)
+                with self.assertRaises(self.processes.ProcessCleanupError) as failure:
+                    self.processes.cleanup_scope(root)
+                self.assertFalse(alive(owner.pid), "unverifiable group blocked verified cleanup")
+                self.assertTrue(alive(record["guardian_pid"]),
+                                "missing ownership record must not authorize a group signal")
+                self.assertIn("ownership unavailable", str(failure.exception))
+                self.assertTrue(pending.exists())
+            finally:
+                if supervisor is not None and supervisor.returncode is None:
+                    # This exact, unreaped child owns the test-created session.
+                    try:
+                        os.killpg(supervisor.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    supervisor.wait(timeout=2)
+                for fd in (ready_read, ready_write, resume_read, resume_write):
+                    os.close(fd)
+                if record is not None:
+                    # Recover only the real ownership evidence received at the barrier.
+                    self.processes._write_json(pending / "process.json", record)
+                    self.processes.cleanup_scope(pending)
+                elif pending.exists():
+                    shutil.rmtree(pending)
+
+    def test_invalid_pending_metadata_is_reported_not_treated_as_empty(self):
+        with self.processes.owned_process(["sleep", "30"], cwd=self.work) as owner:
+            root = Path(owner.identity_process_registry)
+            pending = self.processes._new_scope({self.processes.REGISTRY_ENV: str(root)})
+            try:
+                (pending / ".pending").write_text('{"version":999}')
+                with self.assertRaises(self.processes.ProcessCleanupError) as failure:
+                    self.processes.cleanup_scope(root)
+                self.assertFalse(alive(owner.pid))
+                self.assertIn("Invalid process registration", str(failure.exception))
+                self.assertTrue(pending.exists())
+            finally:
+                shutil.rmtree(pending)
 
     def test_scope_registered_before_actual_command_exec(self):
         code = (

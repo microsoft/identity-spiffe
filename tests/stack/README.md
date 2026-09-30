@@ -94,7 +94,14 @@ for fast-exiting commands with orphaned children. This replaces ancestry polling
 the OS `ps` command is used only to verify identities and termination.
 
 Registration and ancestor-closing checks share a file lock; a closed scope cannot
-exec a new command. Cleanup marks the scope closing before signalling only its
+exec a new command. A new scope has a private `.pending` marker, consumed under
+that lock before guardian creation. Missing registration after that transition
+is unverified ownership, not an empty scope. Incomplete, malformed or stale
+child records do not prevent cleanup of independently verified groups; cleanup
+still reports failure and retains the closed registry for diagnosis. It never
+guesses a PID or signals an unverifiable group.
+
+Cleanup marks the scope closing before signalling only its
 verified registered groups, escalates TERM to KILL, and completes before workspace
 removal. Stale identities, unsafe registries or failed cleanup retain the private
 scope/workspace and raise `StackCleanupFailure`, never PASS. Registry scopes
