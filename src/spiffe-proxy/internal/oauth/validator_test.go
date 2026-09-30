@@ -5,9 +5,12 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,6 +149,59 @@ func TestValidateJWT_ExpiredToken(t *testing.T) {
 	_, err := v.ValidateJWT(tokenString)
 	if err == nil {
 		t.Error("Expected error for expired token")
+	}
+}
+
+func TestValidateJWT_ExpirationRequired(t *testing.T) {
+	privateKey, server, v := testSetup(t)
+	defer server.Close()
+
+	now := time.Now()
+	cases := []struct {
+		name    string
+		exp     interface{}
+		omit    bool
+		wantErr error
+	}{
+		{name: "missing", omit: true, wantErr: jwt.ErrTokenRequiredClaimMissing},
+		{name: "null", exp: nil, wantErr: jwt.ErrTokenRequiredClaimMissing},
+		{name: "invalid_string", exp: "not-a-date", wantErr: jwt.ErrTokenMalformed},
+		{name: "boolean", exp: true, wantErr: jwt.ErrTokenMalformed},
+		{name: "array", exp: []int{1}, wantErr: jwt.ErrTokenMalformed},
+		{name: "object", exp: map[string]int{"seconds": 1}, wantErr: jwt.ErrTokenMalformed},
+		{name: "zero", exp: 0, wantErr: jwt.ErrTokenExpired},
+		{name: "expired", exp: now.Add(-time.Hour).Unix(), wantErr: jwt.ErrTokenExpired},
+		{name: "valid", exp: now.Add(time.Hour).Unix()},
+		{name: "fractional", exp: float64(now.Add(time.Hour).Unix()) + 0.5},
+		{name: "numeric_string", exp: fmt.Sprintf("%d", now.Add(time.Hour).Unix())},
+		{name: "nonfinite_string", exp: "NaN", wantErr: jwt.ErrTokenMalformed},
+		{name: "infinite_string", exp: "Infinity", wantErr: jwt.ErrTokenMalformed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// No iat/nbf: requiring exp must not make other time claims mandatory.
+			payload := jwt.MapClaims{
+				"iss": "https://login.microsoftonline.com/test-tenant/v2.0",
+				"aud": "api://test-app",
+			}
+			if !tc.omit {
+				payload["exp"] = tc.exp
+			}
+			claims, err := v.ValidateJWT(signToken(t, privateKey, "test-kid-1", payload))
+			if tc.wantErr == nil {
+				if err != nil || claims == nil {
+					t.Fatalf("valid expiration rejected: %v", err)
+				}
+			} else {
+				if claims != nil || !errors.Is(err, tc.wantErr) {
+					t.Fatalf("expected expiration error %v and no claims; got %v", tc.wantErr, err)
+				}
+				if errors.Is(tc.wantErr, jwt.ErrTokenRequiredClaimMissing) &&
+					!strings.Contains(err.Error(), "exp claim is required") {
+					t.Fatalf("missing expiration was not explicitly identified: %v", err)
+				}
+			}
+		})
 	}
 }
 

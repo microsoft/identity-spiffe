@@ -9,10 +9,18 @@ On the governed path, the sidecar or target app validates:
 - JWT signature against Entra JWKS
 - issuer
 - audience
-- expiry and not-before
+- required, non-null expiration (`exp`); expired or invalid expiration is rejected
+- not-before when present
 - required roles or claims for the target action
 
 The portal and security portal mock use the shared validator in `src/shared/jwt_validator.py` and fail closed when JWKS fetch or token validation fails.
+
+The Go sidecar, both Python portal validator entry points, and direct A2A app
+validators require `exp`. Signature verification alone, or enabling expiration
+verification without requiring the claim, does not reject expiration-less
+tokens. The JWT libraries retain their existing numeric-date parsing and clock
+skew behavior; this requirement adds no maximum lifetime or mandatory `iat` or
+`nbf` claims.
 
 ## Why Layer 3 Exists
 

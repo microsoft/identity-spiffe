@@ -101,6 +101,7 @@ class EntraJWTValidator:
             audience=self.client_id,
             issuer=self.issuers,
             options={
+                "require": ["exp"],
                 "verify_exp": True,
                 "verify_nbf": True,
                 "verify_iss": True,
@@ -151,4 +152,3 @@ class EntraJWTValidator:
             "groups": claims.get("groups", []),
             "oid": claims.get("oid", ""),
         }
-

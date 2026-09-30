@@ -249,7 +249,7 @@ type entraTokenClaims struct {
 	Version  string   `json:"ver"`
 }
 
-// ValidateJWT validates an Entra ID JWT token: signature, issuer, audience.
+// ValidateJWT validates an Entra ID JWT token: signature, required expiration, issuer, audience.
 // Returns the extracted claims on success.
 func (v *Validator) ValidateJWT(tokenString string) (*Claims, error) {
 	if v.config.TenantID == "" || v.config.Audience == "" {
@@ -278,6 +278,7 @@ func (v *Validator) ValidateJWT(tokenString string) (*Claims, error) {
 	claims := &entraTokenClaims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, v.keyFunc,
 		jwt.WithValidMethods([]string{"RS256"}),
+		jwt.WithExpirationRequired(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("JWT validation failed: %w", err)
@@ -343,7 +344,7 @@ func (v *Validator) ValidateJWT(tokenString string) (*Claims, error) {
 		Subject:      claims.Subject,
 		Roles:        claims.Roles,
 		AppID:        claims.AppID,
-		AZP:         claims.AZP,
+		AZP:          claims.AZP,
 		OID:          claims.OID,
 		TenantID:     claims.TenantID,
 		CustomClaims: customClaims,
