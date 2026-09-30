@@ -88,6 +88,14 @@ distinct run IDs, source commit and source fingerprints are checked; stale
 reports or source edits during verification cannot establish readiness. Let
 implementation agents finish editing before running the gate.
 
+For `check.py --output PATH`, choose a new directory outside the checkout or a
+Git-ignored directory such as `tests/artifacts/my-check`. Unignored in-checkout
+output is rejected before any commands run: generated reports would change the
+whole-worktree provenance, and the gate does not exclude arbitrary output trees
+from source verification. Ignored destinations containing tracked files are
+also rejected, even when those files have been deleted locally. Existing
+directories and symlink paths remain invalid.
+
 Commands register their process groups before execution, including nested Go
 tools. Cleanup can therefore find descendants even after their parent exits.
 Private process registries are retained only if cleanup cannot be verified;

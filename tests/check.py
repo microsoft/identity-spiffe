@@ -55,6 +55,35 @@ def safe_path(path):
     return path
 
 
+class UnsafeOutputError(ValueError):
+    pass
+
+
+def artifact_output(path):
+    """Untracked in-checkout artifacts would invalidate whole-worktree provenance."""
+    path = safe_path(path)
+    checkout = runner.ROOT.parent.resolve()
+    if path.is_relative_to(checkout):
+        relative = path.relative_to(checkout).as_posix()
+        try:
+            tracked = subprocess.run(
+                ["git", "ls-files", "-z", "--cached", "--with-tree=HEAD", "--",
+                 ":(literal)" + relative],
+                cwd=checkout, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, timeout=10, check=False,
+            )
+            ignored = subprocess.run(
+                ["git", "check-ignore", "--quiet", "--", relative + "/"],
+                cwd=checkout, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=10, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            raise UnsafeOutputError from None
+        if tracked.returncode != 0 or tracked.stdout or ignored.returncode != 0:
+            raise UnsafeOutputError
+    return path
+
+
 def prepare_output(path):
     previous = os.umask(0o077)
     try:
@@ -407,7 +436,9 @@ def main(argv=None):
     parser = Parser(description=__doc__)
     parser.add_argument("--repeat", type=int, default=2, help="Fresh local runs (2-10; default 2)")
     parser.add_argument("--timeout", type=int, default=1800, help="Per-command seconds (1-3600)")
-    parser.add_argument("--output", type=Path, help="New private directory (default tests/artifacts/check-*)")
+    parser.add_argument("--output", type=Path,
+                        help="New private directory outside the checkout or Git-ignored "
+                             "(default tests/artifacts/check-*)")
     parser.add_argument("--_unit", help=argparse.SUPPRESS)
     parser.add_argument("--_start", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--_pattern", help=argparse.SUPPRESS)
@@ -419,9 +450,14 @@ def main(argv=None):
             return run_unittests(args._start, args._pattern, args.output, args._unit)
         require(2 <= args.repeat <= 10 and 1 <= args.timeout <= 3600, "Invalid repeat/timeout bounds")
         run_id = datetime.now(timezone.utc).strftime("check-%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8]
-        directory = prepare_output(args.output or ROOT / "artifacts" / run_id)
+        directory = prepare_output(artifact_output(args.output or ROOT / "artifacts" / run_id))
         scratch = directory / "scratch"
         scratch.mkdir(mode=0o700)
+    except UnsafeOutputError:
+        print("INCOMPLETE: output provenance is unavailable or unsafe. Use a new directory "
+              "outside the checkout or a Git-ignored directory with no tracked files, "
+              "such as --output tests/artifacts/<new-name>.", file=sys.stderr)
+        return 2
     except (OSError, ValueError):
         print("INCOMPLETE: invalid arguments or output path; use --help and a new nonsymlink directory.",
               file=sys.stderr)

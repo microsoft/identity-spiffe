@@ -1,6 +1,6 @@
 """Small, offline contracts for the unattended gate; never run the real matrix."""
 
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
 import importlib.util
 import io
 import json
@@ -81,8 +81,13 @@ class CheckContracts(unittest.TestCase):
             ]
             if mode.get('change_id'):
                 rows[0]['id'] = 'browser.changed'
+            if mode.get('edit_source'):
+                (root / 'src' / 'source.py').write_text('# concurrent source edit\\n')
+            if mode.get('git_metadata'):
+                runner.ROOT = root / 'tests'
             metadata = {{
-                **json.loads((root / 'source.json').read_text()),
+                **(runner.git_metadata() if mode.get('git_metadata')
+                   else json.loads((root / 'source.json').read_text())),
                 'selected_suites': list(runner.SUITES),
                 'selected_count': sum('local' in c['profiles'] for c in cases),
                 'python_version': sys.version.split()[0],
@@ -110,16 +115,42 @@ class CheckContracts(unittest.TestCase):
         (self.root / "source.json").write_text(json.dumps(self.check.runner.git_metadata()))
         output = kwargs.pop("output", self.root / kwargs.pop("name", "result"))
         console = io.StringIO()
+        fingerprint = (nullcontext() if kwargs.pop("real_source", False) else
+                       patch.object(self.check, "source_digest", create=True, return_value="0" * 64,
+                                    side_effect=kwargs.pop("source_digests", None)))
         with patch.object(self.check, "ROOT", self.root), \
                 patch.object(self.check, "GROUPS", (("fixture", "unit", "test_*.py"),)), \
-                patch.object(self.check, "source_digest", create=True, return_value="0" * 64,
-                             side_effect=kwargs.pop("source_digests", None)), \
-                redirect_stdout(console), redirect_stderr(console):
+                fingerprint, redirect_stdout(console), redirect_stderr(console):
             code = self.check.main(["--repeat", "2", "--output", str(output), *kwargs.pop("args", [])])
         self.assertEqual(kwargs, {})
         report = json.loads((output / "check.json").read_text())
         self.assertEqual(code, report["exit_code"])
         return code, report, output, console.getvalue()
+
+    @contextmanager
+    def clean_checkout(self, *, edit_source=False):
+        (self.root / ".gitignore").write_text(
+            "/source.json\n/calls.jsonl\n/ignored-artifacts/\n__pycache__/\n"
+        )
+        (self.root / "src").mkdir()
+        (self.root / "src" / "source.py").write_text("# original source\n")
+        self.modes = [{"git_metadata": True}, {"git_metadata": True}]
+        if edit_source:
+            self.modes[0]["edit_source"] = True
+        (self.root / "cases.json").write_text(json.dumps(self.cases))
+        (self.root / "modes.json").write_text(json.dumps(self.modes))
+        for command in (
+            ["git", "init", "--quiet"],
+            ["git", "add", "."],
+            ["git", "-c", "user.name=Gate fixture", "-c", "user.email=fixture@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+             "commit", "--quiet", "-m", "Clean offline fixture"],
+        ):
+            subprocess.run(command, cwd=self.root, check=True, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        with patch.object(self.check.runner, "ROOT", self.root / "tests"):
+            self.assertIs(self.check.runner.git_metadata()["worktree_dirty"], False)
+            yield
 
     def test_stable_pass_is_ready_with_fresh_reports_and_counts(self):
         code, report, output, _ = self.run_gate()
@@ -458,13 +489,107 @@ class CheckContracts(unittest.TestCase):
         self.assertFalse(Path(scope).exists(), "Successful command scope must be cleaned")
 
     def test_custom_report_directory_does_not_move_registry_outside_private_artifacts(self):
-        with tempfile.TemporaryDirectory(prefix="check-output-", dir=ROOT.parent) as directory:
+        with tempfile.TemporaryDirectory(prefix="check-output-") as directory:
             output = Path(directory).resolve() / "check"
             code, report, _, _ = self.run_gate(output=output)
             self.assertEqual(code, 0)
             for step in report["steps"]:
                 if "process_registry" in step:
                     self.assertTrue(Path(step["process_registry"]).is_relative_to(ROOT / "artifacts"))
+
+    def test_clean_checkout_accepts_ignored_and_external_custom_output(self):
+        with self.clean_checkout(), tempfile.TemporaryDirectory(prefix="check-external-") as external:
+            for output in (self.root / "ignored-artifacts" / "custom",
+                           Path(external).resolve() / "custom"):
+                with self.subTest(output=output):
+                    code, report, _, _ = self.run_gate(output=output, real_source=True)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(report["status"], "READY")
+                    self.assertIs(report["metadata"]["worktree_dirty"], False)
+                    for index in (1, 2):
+                        matrix = json.loads((output / f"run-{index}" / "matrix.json").read_text())
+                        self.assertEqual(matrix["exit_code"], 0)
+                        self.assertIs(matrix["metadata"]["worktree_dirty"], False)
+                    self.assertIs(self.check.runner.git_metadata()["worktree_dirty"], False)
+
+    def test_unignored_checkout_output_is_rejected_before_commands_or_writes(self):
+        output = self.root / "custom-output" / "check"
+        console = io.StringIO()
+        with self.clean_checkout(), patch.object(self.check, "ROOT", self.root), \
+                patch.object(self.check, "GROUPS", (("fixture", "unit", "test_*.py"),)), \
+                patch.object(self.check, "run_command", wraps=self.check.run_command) as command, \
+                redirect_stdout(console), redirect_stderr(console):
+            self.assertEqual(self.check.main(["--output", str(output)]), 2)
+            command.assert_not_called()
+            self.assertFalse(output.parent.exists())
+            self.assertIn("tests/artifacts/", console.getvalue())
+            self.assertIn("outside the checkout", console.getvalue())
+            self.assertIs(self.check.runner.git_metadata()["worktree_dirty"], False)
+
+    def test_ignored_output_cannot_recreate_deleted_tracked_files(self):
+        with self.clean_checkout():
+            output = self.root / "ignored-artifacts" / "tracked"
+            output.mkdir(parents=True)
+            tracked = output / "matrix.json"
+            tracked.write_text("{}\n")
+            subprocess.run(["git", "add", "--force", str(tracked)], cwd=self.root,
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            tracked.unlink()
+            output.rmdir()
+            with patch.object(self.check, "ROOT", self.root), \
+                    patch.object(self.check, "GROUPS", (("fixture", "unit", "test_*.py"),)), \
+                    patch.object(self.check, "run_command", wraps=self.check.run_command) as command, \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(self.check.main(["--output", str(output)]), 2)
+                command.assert_not_called()
+            self.assertFalse(output.exists())
+
+    def test_ignored_output_cannot_recreate_staged_deletions(self):
+        with self.clean_checkout():
+            output = self.root / "ignored-artifacts" / "staged"
+            output.mkdir(parents=True)
+            tracked = output / "matrix.json"
+            tracked.write_text("{}\n")
+            for command in (
+                ["git", "add", "--force", str(tracked)],
+                ["git", "-c", "user.name=Gate fixture", "-c", "user.email=fixture@example.invalid",
+                 "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+                 "commit", "--quiet", "-m", "Tracked artifact fixture"],
+                ["git", "rm", "--quiet", "--cached", str(tracked)],
+            ):
+                subprocess.run(command, cwd=self.root, check=True, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+            tracked.unlink()
+            output.rmdir()
+            with patch.object(self.check, "ROOT", self.root), \
+                    patch.object(self.check, "GROUPS", (("fixture", "unit", "test_*.py"),)), \
+                    patch.object(self.check, "run_command", wraps=self.check.run_command) as command, \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(self.check.main(["--output", str(output)]), 2)
+                command.assert_not_called()
+            self.assertFalse(output.exists())
+
+    def test_real_source_edit_during_safe_custom_output_fails_the_gate(self):
+        with self.clean_checkout(edit_source=True):
+            for initially_dirty in (False, True):
+                with self.subTest(initially_dirty=initially_dirty):
+                    source = self.root / "src" / "source.py"
+                    source.write_text("# already dirty source\n" if initially_dirty else "# original source\n")
+                    before = self.check.source_digest()
+                    code, report, output, _ = self.run_gate(
+                        output=self.root / "ignored-artifacts" / str(initially_dirty), real_source=True,
+                    )
+                    self.assertEqual(code, 1)
+                    self.assertEqual(report["status"], "FAIL")
+                    self.assertIs(report["metadata"]["worktree_dirty"], initially_dirty)
+                    self.assertEqual(report["stability"]["status"], "INCOMPLETE")
+                    self.assertNotEqual(before, self.check.source_digest())
+                    for index in (1, 2):
+                        step = next(s for s in report["steps"] if s["id"] == f"run-{index}")
+                        self.assertEqual(step["status"], "FAIL")
+                        self.assertEqual(step["returncode"], 0)
+                        matrix = json.loads((output / f"run-{index}" / "matrix.json").read_text())
+                        self.assertEqual(matrix["exit_code"], 0)
 
     def test_cleanup_error_is_a_failure_even_after_successful_command(self):
         original = self.check.owned_process
