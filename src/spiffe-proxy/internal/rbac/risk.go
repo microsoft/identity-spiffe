@@ -17,9 +17,10 @@ import (
 // Valid risk levels. These map to Entra ID Protection risk levels
 // and the agentIdRiskLevels CA condition.
 const (
-	RiskLow    = "low"
-	RiskMedium = "medium"
-	RiskHigh   = "high"
+	RiskLow     = "low"
+	RiskMedium  = "medium"
+	RiskHigh    = "high"
+	RiskUnknown = "unknown"
 )
 
 // ValidRiskLevel returns true if the level is a recognized risk level.
@@ -39,7 +40,7 @@ type RiskStore struct {
 }
 
 // NewRiskStore creates an empty risk store.
-// Unknown agents default to "low" risk.
+// Unknown agents have no trustworthy risk evidence.
 func NewRiskStore() *RiskStore {
 	return &RiskStore{
 		risks: make(map[string]string),
@@ -47,14 +48,14 @@ func NewRiskStore() *RiskStore {
 }
 
 // GetRisk returns the risk level for the given SPIFFE ID.
-// Returns "low" if the agent has no explicit risk entry.
+// Returns "unknown" if the agent has no explicit risk entry.
 func (rs *RiskStore) GetRisk(spiffeID string) string {
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
 	if level, ok := rs.risks[spiffeID]; ok {
 		return level
 	}
-	return RiskLow
+	return RiskUnknown
 }
 
 // SetRisk updates the risk level for the given SPIFFE ID.
@@ -64,7 +65,7 @@ func (rs *RiskStore) SetRisk(spiffeID, level string) string {
 	defer rs.mu.Unlock()
 	prev := rs.risks[spiffeID]
 	if prev == "" {
-		prev = RiskLow
+		prev = RiskUnknown
 	}
 	rs.risks[spiffeID] = level
 	log.Printf("[RISK] Agent risk updated: %s → %s (was %s)", spiffeID, level, prev)

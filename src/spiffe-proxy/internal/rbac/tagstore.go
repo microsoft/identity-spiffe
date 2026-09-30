@@ -10,9 +10,8 @@ import (
 // Graph API custom security attributes at startup and can be updated at
 // runtime via the /mgmt/agent-tags endpoint.
 //
-// When a tag is present in the TagStore for a caller's SPIFFE ID, it takes
-// precedence over the static ca.agent_tag value in the YAML policy. This
-// makes enforcement use real Entra attributes instead of hardcoded values.
+// When configured on the engine, this store is authoritative: absent or empty
+// tags cannot fall back to the static ca.agent_tag value in YAML policy.
 type TagStore struct {
 	mu   sync.RWMutex
 	tags map[string]string // SPIFFE ID → tag (e.g., "Finance")

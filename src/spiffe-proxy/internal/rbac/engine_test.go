@@ -1074,16 +1074,81 @@ func TestCA_TagStore_EmptyOverridesFinance(t *testing.T) {
 	}
 }
 
-func TestCA_TagStore_NotPresent_FallsBackToYAML(t *testing.T) {
-	// TagStore exists but has no entry for budget-report.
-	// Should fall back to YAML tag ("finance") and match.
+func TestCA_TagStore_NotPresent_Denied(t *testing.T) {
+	// A configured Graph tag source must not fall back to an allowing YAML tag.
 	ts := NewTagStore()
 	// Don't set any tag for budget-report
 
 	e := setupCATestEngineWithTagStore(t, nil, ts)
 	d := e.Evaluate("spiffe://aim.microsoft.com/ests/bp/test-bp-oid/aid/budget-report", "GET", "/budget/read", "")
-	if d.Action != ActionAllow {
-		t.Errorf("expected ALLOW (YAML fallback tag=finance), got %s (reason: %s)", d.Action, d.Reason)
+	if d.Action != ActionDeny || d.EnforcementLayer != LayerCA || d.Reason != "agent_tag_mismatch" {
+		t.Errorf("expected CA DENY for absent Graph tag, got %+v", d)
+	}
+}
+
+func TestCA_PolicyAvailability(t *testing.T) {
+	const caller = "spiffe://aim.microsoft.com/ests/bp/test-bp-oid/aid/budget-report"
+	for _, ready := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ready=%v", ready), func(t *testing.T) {
+			e := setupCATestEngine(t, NewRiskStore())
+			cache := ca.NewPolicyCache(nil, 0)
+			if ready {
+				cache.SetBlockedRiskLevelsForTest(nil) // observed no applicable policy
+			}
+			e.caPolicyCache = cache
+			d := e.Evaluate(caller, "GET", "/budget/read", "")
+			if ready {
+				if d.Action != ActionAllow {
+					t.Fatalf("healthy empty policy should allow without risk lookup: %+v", d)
+				}
+			} else if d.Action != ActionDeny || d.EnforcementLayer != LayerCA ||
+				d.Reason != "ca_policy_unavailable" || d.StatusCode != 403 {
+				t.Fatalf("uninitialized policy must deny: %+v", d)
+			}
+		})
+	}
+}
+
+func TestCA_RequiredRiskEvidence(t *testing.T) {
+	const caller = "spiffe://aim.microsoft.com/ests/bp/test-bp-oid/aid/budget-report"
+	for _, level := range []string{"missing", "nil_store", "", "unknown", "unknownFutureValue", "none", "low", "medium", "high"} {
+		t.Run(level, func(t *testing.T) {
+			rs := NewRiskStore()
+			if level == "nil_store" {
+				rs = nil
+			} else if level != "missing" {
+				rs.SetRisk(caller, level)
+			}
+			e := setupCATestEngineWithCAPolicyCache(t, rs, []string{"high"})
+			d := e.Evaluate(caller, "GET", "/budget/read", "")
+			if level == "low" || level == "medium" {
+				if d.Action != ActionAllow {
+					t.Fatalf("explicit unblocked risk should allow: %+v", d)
+				}
+			} else {
+				reason := "agent_risk_unavailable"
+				if level == "high" {
+					reason = "high_risk_agent_blocked"
+				}
+				if d.Action != ActionDeny || d.EnforcementLayer != LayerCA || d.StatusCode != 403 || d.Reason != reason {
+					t.Fatalf("required risk must deny (%s): %+v", reason, d)
+				}
+			}
+		})
+	}
+}
+
+func TestCA_TagRemovalDoesNotRestoreYAMLAllow(t *testing.T) {
+	const caller = "spiffe://aim.microsoft.com/ests/bp/test-bp-oid/aid/budget-report"
+	ts := NewTagStore()
+	ts.SetTag(caller, "finance")
+	e := setupCATestEngineWithTagStore(t, nil, ts)
+	if d := e.Evaluate(caller, "GET", "/budget/read", ""); d.Action != ActionAllow {
+		t.Fatalf("healthy Graph tag control failed: %+v", d)
+	}
+	ts.RemoveTag(caller)
+	if d := e.Evaluate(caller, "GET", "/budget/read", ""); d.Action != ActionDeny || d.Reason != "agent_tag_mismatch" {
+		t.Fatalf("removed Graph tag restored static permission: %+v", d)
 	}
 }
 
