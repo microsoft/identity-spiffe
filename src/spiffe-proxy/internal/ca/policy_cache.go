@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"sync"
 	"time"
 )
@@ -58,7 +59,8 @@ type graphGrantControls struct {
 }
 
 // NewPolicyCache creates a CA policy cache that syncs from Graph.
-// If client is nil, the cache operates in pass-through mode (no Graph).
+// If client is nil, no automatic refresh runs. Omit the cache from the engine
+// to disable Graph risk enforcement; an attached uninitialized cache denies.
 func NewPolicyCache(client *GraphClient, syncInterval time.Duration) *PolicyCache {
 	if syncInterval <= 0 {
 		syncInterval = 60 * time.Second
@@ -101,12 +103,19 @@ func (pc *PolicyCache) Stop() {
 }
 
 // GetBlockedRiskLevels returns the set of risk levels that should be blocked
-// based on enabled CA policies. Returns nil if Graph is not configured or
-// no policies have agentIdRiskLevels conditions.
+// based on enabled CA policies. Enforcement must also check readiness with
+// GetRiskPolicy; empty levels alone do not prove policy availability.
 func (pc *PolicyCache) GetBlockedRiskLevels() []string {
+	levels, _ := pc.GetRiskPolicy()
+	return levels
+}
+
+// GetRiskPolicy returns an atomic snapshot of blocked levels and whether a
+// policy list has been successfully observed. Refresh errors retain that list.
+func (pc *PolicyCache) GetRiskPolicy() ([]string, bool) {
 	pc.mu.RLock()
 	defer pc.mu.RUnlock()
-	return pc.blockedLevels
+	return slices.Clone(pc.blockedLevels), !pc.lastFetch.IsZero()
 }
 
 // SetBlockedRiskLevelsForTest sets blocked risk levels directly for unit testing.
@@ -114,7 +123,8 @@ func (pc *PolicyCache) GetBlockedRiskLevels() []string {
 func (pc *PolicyCache) SetBlockedRiskLevelsForTest(levels []string) {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	pc.blockedLevels = levels
+	pc.blockedLevels = slices.Clone(levels)
+	pc.lastFetch = time.Now()
 }
 
 // GetCachedPolicies returns a snapshot of all cached CA policies for debugging.
@@ -132,7 +142,8 @@ func (pc *PolicyCache) Status() map[string]interface{} {
 	defer pc.mu.RUnlock()
 	status := map[string]interface{}{
 		"enabled":             pc.client != nil,
-		"blocked_risk_levels": pc.blockedLevels,
+		"ready":               !pc.lastFetch.IsZero(),
+		"blocked_risk_levels": slices.Clone(pc.blockedLevels),
 		"policy_count":        len(pc.policies),
 		"fetch_count":         pc.fetchCount,
 		"sync_interval":       pc.interval.String(),
@@ -167,6 +178,14 @@ func (pc *PolicyCache) refresh() {
 		log.Printf("[CA-Cache] Parse failed: %v", err)
 		pc.mu.Lock()
 		pc.lastError = fmt.Errorf("parse: %w", err)
+		pc.mu.Unlock()
+		return
+	}
+	if resp.Value == nil {
+		err := fmt.Errorf("policy response must contain a non-null value array")
+		log.Printf("[CA-Cache] Parse failed: %v", err)
+		pc.mu.Lock()
+		pc.lastError = err
 		pc.mu.Unlock()
 		return
 	}

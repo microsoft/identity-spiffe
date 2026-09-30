@@ -484,7 +484,7 @@ func (s *Server) getAgentRisk(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"risks":         risks,
 		"count":         len(risks),
-		"default_level": "low",
+		"default_level": rbac.RiskUnknown,
 	})
 }
 
@@ -633,11 +633,13 @@ func (s *Server) handleCAPolicyEffective(w http.ResponseWriter, r *http.Request)
 
 	if s.caPolicyCache == nil {
 		result["enabled"] = false
+		result["ready"] = false
 		result["blocked_risk_levels"] = []string{}
 		result["reason"] = "CA policy cache not configured (GRAPH_CLIENT_ID/SECRET not set)"
 	} else {
 		status := s.caPolicyCache.Status()
 		result["enabled"] = status["enabled"]
+		result["ready"] = status["ready"]
 		result["blocked_risk_levels"] = status["blocked_risk_levels"]
 		result["policy_count"] = status["policy_count"]
 		result["fetch_count"] = status["fetch_count"]

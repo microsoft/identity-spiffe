@@ -43,8 +43,9 @@ type Engine struct {
 // NewEngine creates an RBAC evaluation engine backed by the given store.
 // The validator is optional — if nil, require_jwt rules fail closed
 // (denied with 503 "jwt_validator_unavailable").
-// The riskStore is optional — if nil, risk checks are skipped.
-// The tagStore is optional — if nil, tags are read from YAML policy only.
+// The riskStore is required when the CA cache has active risk blocks.
+// The tagStore is optional — if nil, tags are read from YAML policy only;
+// when configured, missing Graph tags deny rather than falling back to YAML.
 // The caPolicyCache is optional — if nil, risk enforcement is skipped (no YAML fallback).
 func NewEngine(store *PolicyStore, validator oauth.JWTValidator, riskStore *RiskStore, tagStore *TagStore, opts ...EngineOption) *Engine {
 	e := &Engine{store: store, validator: validator, riskStore: riskStore, tagStore: tagStore}
@@ -387,11 +388,29 @@ func (e *Engine) evaluateCA(policy *Policy, cp *CallerPolicy, spiffeID string) *
 	}
 
 	// 4b-2: Risk check — CA policy from Entra Graph is the sole source of truth.
-	// No YAML fallback: if Graph credentials are configured but CA policy can't be
-	// read, risk enforcement is skipped (not silently using developer-authored YAML).
-	if e.riskStore != nil && e.caPolicyCache != nil {
-		if blockedLevels := e.caPolicyCache.GetBlockedRiskLevels(); len(blockedLevels) > 0 {
-			risk := e.riskStore.GetRisk(spiffeID)
+	// No YAML fallback. A configured cache must have observed a valid policy
+	// list; a failed refresh retains the last-known-good list, including empty.
+	if e.caPolicyCache != nil {
+		blockedLevels, ready := e.caPolicyCache.GetRiskPolicy()
+		if !ready {
+			log.Printf("[CA] Policy unavailable: %s", spiffeID)
+			return &Decision{
+				Action: ActionDeny, Reason: "ca_policy_unavailable",
+				EnforcementLayer: LayerCA, StatusCode: 403,
+			}
+		}
+		if len(blockedLevels) > 0 {
+			risk := RiskUnknown
+			if e.riskStore != nil {
+				risk = e.riskStore.GetRisk(spiffeID)
+			}
+			if !ValidRiskLevel(risk) {
+				log.Printf("[CA] Agent risk unavailable: %s", spiffeID)
+				return &Decision{
+					Action: ActionDeny, Reason: "agent_risk_unavailable",
+					EnforcementLayer: LayerCA, StatusCode: 403, AgentRisk: RiskUnknown,
+				}
+			}
 			for _, blocked := range blockedLevels {
 				if risk == blocked {
 					log.Printf("[CA] Agent risk blocked: %s risk=%s (blocked levels: %v, source: entra_ca_policy)", spiffeID, risk, blockedLevels)
@@ -408,20 +427,18 @@ func (e *Engine) evaluateCA(policy *Policy, cp *CallerPolicy, spiffeID string) *
 	}
 
 	// 4b-3: Tag check
-	// Priority: TagStore (Graph-sourced, real Entra attributes) > YAML ca.agent_tag
+	// A configured TagStore is authoritative, including absent or empty tags.
 	targetTag := policy.AdminGovernance.TargetAgentTag
 	if targetTag != "" {
 		if cp.CA.SkipTargetTagCheck {
 			log.Printf("[CA] Target tag check bypassed for caller: %s (%s)", spiffeID, cp.Name)
 			return nil
 		}
-		callerTag := cp.CA.AgentTag // fallback: YAML policy value
+		callerTag := cp.CA.AgentTag // static-only mode when no TagStore is configured
 		tagSource := "yaml"
 		if e.tagStore != nil {
-			if graphTag, ok := e.tagStore.GetTag(spiffeID); ok {
-				callerTag = graphTag
-				tagSource = "graph"
-			}
+			callerTag, _ = e.tagStore.GetTag(spiffeID)
+			tagSource = "graph"
 		}
 		if !strings.EqualFold(callerTag, targetTag) {
 			log.Printf("[CA] Agent tag mismatch: %s caller_tag=%q (source=%s) target_tag=%q", spiffeID, callerTag, tagSource, targetTag)

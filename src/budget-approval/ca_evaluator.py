@@ -45,8 +45,9 @@ class CAEvaluator:
     Thread-safe for use in async FastAPI apps.
 
     Security model: FAIL CLOSED. If any security lookup fails (Graph
-    unavailable, 404, timeout, missing credentials), the decision is DENY.
-    Never treat missing data as "safe".
+    unavailable, timeout, missing credentials), the decision is DENY.
+    Policy refresh errors retain the last-known-good list. A riskyAgents 404
+    counts as no risk only after successful service-principal resolution.
     """
 
     def __init__(self):
@@ -66,20 +67,23 @@ class CAEvaluator:
             return self._token_cache["token"]
 
         token_url = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/oauth2/v2.0/token"
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(token_url, data={
-                "client_id": GRAPH_CLIENT_ID,
-                "client_secret": GRAPH_CLIENT_SECRET,
-                "scope": "https://graph.microsoft.com/.default",
-                "grant_type": "client_credentials",
-            })
-            if resp.status_code == 200:
-                data = resp.json()
-                self._token_cache["token"] = data["access_token"]
-                self._token_cache["expires_at"] = now + data.get("expires_in", 3600)
-                return data["access_token"]
-            logger.error(f"Graph token acquisition failed: {resp.status_code}")
-            return None
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(token_url, data={
+                    "client_id": GRAPH_CLIENT_ID,
+                    "client_secret": GRAPH_CLIENT_SECRET,
+                    "scope": "https://graph.microsoft.com/.default",
+                    "grant_type": "client_credentials",
+                })
+                if resp.status_code == 200:
+                    data = resp.json()
+                    self._token_cache["token"] = data["access_token"]
+                    self._token_cache["expires_at"] = now + data.get("expires_in", 3600)
+                    return data["access_token"]
+                logger.error(f"Graph token acquisition failed: {resp.status_code}")
+        except (httpx.RequestError, ValueError, KeyError) as exc:
+            logger.error("Graph token acquisition error — unavailable: %s", exc)
+        return None
 
     async def _resolve_sp_object_id(self, app_id: str) -> Optional[str]:
         """Resolve an appId (client ID) to the service principal's object ID.
@@ -116,10 +120,12 @@ class CAEvaluator:
             logger.warning(f"SP lookup failed for appId {app_id}: {e}")
         return None
 
-    async def fetch_ca_policies(self) -> list[dict]:
+    async def fetch_ca_policies(self) -> Optional[list[dict]]:
         """Fetch CA policies from Graph that have agentIdRiskLevels conditions.
 
-        Returns list of parsed CA policies. Cached for CA_POLICY_CACHE_TTL seconds.
+        Returns a parsed list (possibly empty), or None if never successfully
+        observed. Refresh errors retain the last-known-good list without renewing
+        its TTL. Cached for CA_POLICY_CACHE_TTL seconds.
         """
         now = time.time()
         if (self._policy_cache["policies"] is not None
@@ -128,8 +134,8 @@ class CAEvaluator:
 
         token = await self._get_graph_token()
         if not token:
-            logger.debug("Graph credentials not configured — CA policy fetch skipped")
-            return self._policy_cache.get("policies") or []
+            logger.error("Graph token unavailable for CA policy fetch — retaining last-known-good policy")
+            return self._policy_cache["policies"]
 
         headers = {"Authorization": f"Bearer {token}"}
         # Fetch all CA policies (no $filter — Graph beta rejects OR expressions).
@@ -140,7 +146,10 @@ class CAEvaluator:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
-                    all_policies = resp.json().get("value", [])
+                    all_policies = resp.json().get("value")
+                    if not isinstance(all_policies, list):
+                        logger.error("CA policy response has no non-null value array — retaining last-known-good policy")
+                        return self._policy_cache["policies"]
                     # Filter client-side: only enabled/report-only policies with agentIdRiskLevels
                     risk_policies = []
                     for p in all_policies:
@@ -157,10 +166,10 @@ class CAEvaluator:
                     return risk_policies
                 else:
                     logger.warning(f"CA policy fetch failed: {resp.status_code}")
-                    return self._policy_cache.get("policies") or []
+                    return self._policy_cache["policies"]
         except Exception as e:
             logger.error(f"CA policy fetch error: {e}")
-            return self._policy_cache.get("policies") or []
+            return self._policy_cache["policies"]
 
     async def fetch_agent_risk(self, agent_oid: str) -> Optional[str]:
         """Fetch agent risk level from Entra ID Protection riskyAgents API.
@@ -196,7 +205,10 @@ class CAEvaluator:
                 resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
-                    risk_level = data.get("riskLevel", "none")
+                    risk_level = data.get("riskLevel")
+                    if risk_level not in ("high", "medium", "low", "none"):
+                        logger.error("Graph riskLevel missing or unrecognized — fail closed")
+                        return None
                     risk_state = data.get("riskState", "unknown")
                     # confirmedSafe with riskLevel=none means agent was explicitly cleared
                     if risk_state == "confirmedSafe" or risk_level == "none":
@@ -261,9 +273,10 @@ class CAEvaluator:
     ) -> tuple:
         """Evaluate whether a caller should be blocked based on Entra CA policies.
 
-        FAIL CLOSED: If Graph credentials are missing, Graph is unreachable, or
-        risk lookup fails, the caller IS blocked. This is a security PoC —
-        silent bypass of enforcement is never acceptable.
+        FAIL CLOSED: Missing Graph credentials, never-observed policy, or
+        unavailable required risk blocks the caller. Policy refresh errors
+        retain the last-known-good list; observed no applicable risk policy
+        imposes no risk restriction.
 
         Args:
             caller_oid: The Entra agent identity OID (appId) of the caller.
@@ -288,7 +301,7 @@ class CAEvaluator:
 
         # Fetch CA policies
         policies = await self.fetch_ca_policies()
-        if not policies:
+        if policies is None:
             # FAIL CLOSED: Can't read CA policies = DENY
             details["enforcement_source"] = "fail_closed"
             details["reason"] = "Cannot read CA policies from Graph — DENY (fail closed)"
@@ -303,7 +316,7 @@ class CAEvaluator:
         details["ca_policy_ids"] = [p.get("id") for p in policies]
 
         if not blocked_levels:
-            details["reason"] = "CA policies exist but no risk levels are actively blocked"
+            details["reason"] = "No risk levels are actively blocked by the observed CA policies"
             details["agent_risk"] = "n/a"
             details["risk_source"] = "entra_ca_policy"
             return False, details
@@ -337,7 +350,7 @@ class CAEvaluator:
         # Fetch caller's risk from Entra ID Protection (resolves appId -> SP OID)
         caller_risk = await self.fetch_agent_risk(caller_oid)
 
-        if caller_risk is None:
+        if caller_risk not in ("none", "low", "medium", "high"):
             # FAIL CLOSED: Can't determine risk = DENY
             details["enforcement_source"] = "fail_closed"
             details["reason"] = "Cannot determine caller risk from Entra — DENY (fail closed)"
