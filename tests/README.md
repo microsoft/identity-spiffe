@@ -198,15 +198,16 @@ the selected profile and all inventory cases, including those not run.
 
 ### Initial security regression baseline
 
-The protocol matrix currently reproduces four product failures: expiration-less
+The initial local baseline exposed six product defects across ten failing
+protocol and connected E2E rows: expiration-less
 JWT acceptance, an initial policy-control-plane outage allowing access, missing
-risk treated as low risk, and absent Graph tags falling back to YAML. The two
-HTTP request-framing regressions now pass with parser-bounded, one-request
-tunnel forwarding. See the
+risk treated as low risk, absent Graph tags falling back to YAML, and two HTTP
+request-framing bypasses. See the
 [exact case IDs and evidence boundaries](protocols/README.md#result-contract-and-known-product-failures).
-They remain normal FAIL results, not expected failures or skips. Consequently,
-the complete local command and CI job are intentionally red until separately
-authorized product fixes satisfy these assertions. A red security regression
+Production fixes are separately authorized; current outcomes come from fresh
+reports, not this historical baseline. The regression gate requires every
+selected assertion and harness self-test to pass. Any unresolved failure remains
+a normal FAIL result, never an expected failure or skip. A red security regression
 is useful evidence, not a reason to loosen the test.
 
 ## Harness self-tests
