@@ -4,6 +4,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -253,7 +254,6 @@ class PolicyService:
                 "ca": {
                     "agent_state": "enabled",
                     "agent_tag": "Finance",
-                    "blocked_risk_levels": ["high"],
                 },
                 "rules": [
                     {"path": "/budget/read", "methods": ["GET", "POST"], "action": "allow", "require_jwt": True, "required_roles": ["Budget.Read"]},
@@ -275,7 +275,6 @@ class PolicyService:
                 "ca": {
                     "agent_state": "enabled",
                     "agent_tag": "HR",
-                    "blocked_risk_levels": ["high"],
                 },
                 "rules": [{"path": "/*", "methods": ["*"], "action": "deny"}],
             },
@@ -285,7 +284,6 @@ class PolicyService:
                 "ca": {
                     "agent_state": "enabled",
                     "agent_tag": "Finance",
-                    "blocked_risk_levels": ["high"],
                 },
                 "rules": [
                     {"path": "/budget/read", "methods": ["GET", "POST"], "action": "allow", "require_jwt": True, "required_roles": ["Budget.Read"]},
@@ -298,7 +296,6 @@ class PolicyService:
                 "ca": {
                     "agent_state": "enabled",
                     "agent_tag": "Operations",
-                    "blocked_risk_levels": ["high"],
                     "skip_target_tag_check": True,
                 },
                 "rules": [{"path": "/mgmt/*", "methods": ["GET", "PUT"], "action": "allow"}],
@@ -317,6 +314,17 @@ class PolicyService:
             )
         return specs
 
+    def append_identity_policy(self, policy, entry, spiffe_id):
+        # type: (Dict[str, Any], Dict[str, Any], str) -> None
+        trust_domain = urlsplit(spiffe_id).netloc
+        if trust_domain == self.settings.trust_domain:
+            entry["spiffe_id_prefix"] = spiffe_id
+            policy["policies"].append(entry)
+            return
+        entry["spiffe_id"] = spiffe_id
+        entry["trust_domain"] = trust_domain
+        policy.setdefault("federated_policies", []).append(entry)
+
     def build_permissive_rbac_yaml(self):
         # type: () -> str
         policy = {
@@ -326,39 +334,30 @@ class PolicyService:
             "admin_governance": {
                 "enabled": True,
                 "target_agent_tag": "finance",
-                "risk_enforcement": "sts",
+                "risk_enforcement": "off",
             },
             "policies": [],
+            "federated_policies": [],
         }
         for spec in self.desired_agent_specs():
             spiffe_id = self.get_agent_spiffe_id(spec["name"])
             entry = {
-                "spiffe_id_prefix": spiffe_id,
                 "name": spec["name"],
                 "description": spec.get("description", spec["name"]),
             }
             if "ca" in spec:
                 entry["ca"] = dict(spec["ca"])
-            # Permissive: all RBAC rules are allow, but JWT is still enforced
+            # Permissive: allow all routes without OAuth/JWT enforcement.
             entry["rules"] = []
             for rule in spec["rules"]:
                 permissive = rule.get("permissive", {})
-                require_jwt = permissive.get("require_jwt", rule.get("require_jwt"))
-                required_roles = permissive.get("required_roles", rule.get("required_roles"))
-                if required_roles:
-                    require_jwt = True
-
                 yaml_rule = {
                     "path": rule["path"],
                     "methods": rule["methods"],
                     "action": permissive.get("action", "allow"),
                 }
-                if require_jwt:
-                    yaml_rule["require_jwt"] = True
-                if required_roles:
-                    yaml_rule["required_roles"] = required_roles
                 entry["rules"].append(yaml_rule)
-            policy["policies"].append(entry)
+            self.append_identity_policy(policy, entry, spiffe_id)
         return yaml.safe_dump(policy, sort_keys=False, default_flow_style=False, indent=2)
 
     def build_hardened_rbac_yaml(self):
@@ -370,14 +369,14 @@ class PolicyService:
             "admin_governance": {
                 "enabled": True,
                 "target_agent_tag": "finance",
-                "risk_enforcement": "sts",
+                "risk_enforcement": "off",
             },
             "policies": [],
+            "federated_policies": [],
         }
         for spec in self.desired_agent_specs():
             spiffe_id = self.get_agent_spiffe_id(spec["name"])
             entry = {
-                "spiffe_id_prefix": spiffe_id,
                 "name": spec["name"],
                 "description": spec["description"],
             }
@@ -393,7 +392,7 @@ class PolicyService:
                 if rule.get("required_roles"):
                     yaml_rule["required_roles"] = rule["required_roles"]
                 entry["rules"].append(yaml_rule)
-            policy["policies"].append(entry)
+            self.append_identity_policy(policy, entry, spiffe_id)
         return yaml.safe_dump(policy, sort_keys=False, default_flow_style=False, indent=2)
 
     def harden_policy_additive(self, current_policy):
@@ -402,6 +401,7 @@ class PolicyService:
             "version": current_policy.get("version", "4.0"),
             "trust_domain": current_policy.get("trust_domain", self.settings.trust_domain),
             "default_action": "deny",
+            "admin_governance": dict(current_policy.get("admin_governance", {})),
             "policies": list(current_policy.get("policies", [])),
         }
         for spec in self.desired_agent_specs():
@@ -416,6 +416,29 @@ class PolicyService:
                 spec["rules"],
             )
         return self.ensure_control_plane_policy(policy)
+
+    def enable_jwt_validation(self, current_policy):
+        # type: (Dict[str, Any]) -> Dict[str, Any]
+        policy = dict(current_policy)
+        policy.pop("loaded_at", None)
+        policy.pop("request_count", None)
+        policy["policies"] = [dict(entry) for entry in current_policy.get("policies", [])]
+        policy["federated_policies"] = [dict(entry) for entry in current_policy.get("federated_policies", [])]
+        for collection_name in ("policies", "federated_policies"):
+            for entry in policy[collection_name]:
+                if entry.get("name") == MGMT_PLANE_AGENT_KEY:
+                    continue
+                rules = [dict(rule) for rule in entry.get("rules", [])]
+                for rule in rules:
+                    if str(rule.get("action", "")).lower() != "allow":
+                        continue
+                    rule["require_jwt"] = True
+                    if rule.get("path") == "/budget/read":
+                        rule["required_roles"] = ["Budget.Read"]
+                    elif rule.get("path") == "/budget/submit":
+                        rule["required_roles"] = ["Budget.Submit"]
+                entry["rules"] = rules
+        return policy
 
     async def get_policy(self, request_id):
         # type: (str) -> Dict[str, Any]
@@ -438,6 +461,89 @@ class PolicyService:
                     cp.pop("spiffe_id", None)
             yaml_text = yaml.safe_dump(policy_doc, sort_keys=False, default_flow_style=False, indent=2)
         return await self.admin_client.put_yaml("policy", yaml_text, request_id)
+
+    def preset_mtls_ids(self, preset_name):
+        # type: (str) -> List[str]
+        required_agent_keys = ["budget-report", "budget-approval"]
+        if preset_name == "permissive":
+            required_agent_keys.append("employee-menus")
+        allowed = []
+        for agent_key in required_agent_keys:
+            agent = self.settings.agents.get(agent_key)
+            if not agent or not agent.spiffe_id:
+                raise PortalError(
+                    503,
+                    "preset_identity_missing",
+                    "Cannot apply preset because agent identity is unavailable",
+                    {"agent": agent_key},
+                )
+            allowed.append(agent.spiffe_id)
+        control_plane_id = self.settings.control_plane.spiffe_id
+        if not control_plane_id:
+            raise PortalError(
+                503,
+                "preset_identity_missing",
+                "Cannot apply preset because control-plane identity is unavailable",
+                {"agent": MGMT_PLANE_AGENT_KEY},
+            )
+        allowed.append(control_plane_id)
+        return list(dict.fromkeys(allowed))
+
+    async def apply_preset(self, preset_name, request_id, risk_enforcement_enabled=False, risk_cache_seconds=90):
+        # type: (str, str) -> Dict[str, Any]
+        if preset_name == "hardened":
+            preset_yaml = self.build_hardened_rbac_yaml()
+        elif preset_name == "permissive":
+            preset_yaml = self.build_permissive_rbac_yaml()
+        else:
+            raise PortalError(404, "preset_not_found", "Unknown built-in policy preset")
+
+        preset_doc = yaml.safe_load(preset_yaml)
+        preset_doc["admin_governance"]["risk_enforcement"] = "data_plane" if risk_enforcement_enabled else "off"
+        preset_doc["admin_governance"]["risk_cache_seconds"] = risk_cache_seconds
+        preset_yaml = yaml.safe_dump(preset_doc, sort_keys=False)
+        target_mtls_ids = self.preset_mtls_ids(preset_name)
+        health = await self.admin_client.get_json("health", request_id)
+        if not health.get("risk_enforcement_control_supported"):
+            raise PortalError(
+                409, "sidecar_upgrade_required",
+                "Demo presets require the updated spiffe-proxy risk enforcement control",
+            )
+        previous_policy = await self.get_policy(request_id)
+        policy_result = await self.put_policy(preset_yaml, request_id)
+        try:
+            mtls_result = await self.put_mtls_policy(target_mtls_ids, request_id)
+        except PortalError as update_error:
+            rollback_doc = {
+                key: value
+                for key, value in previous_policy.items()
+                if key not in {"loaded_at", "request_count"}
+            }
+            try:
+                await self.put_policy(
+                    yaml.safe_dump(rollback_doc, sort_keys=False, default_flow_style=False, indent=2),
+                    request_id,
+                )
+            except PortalError as rollback_error:
+                raise PortalError(
+                    500,
+                    "preset_apply_and_rollback_failed",
+                    "Preset mTLS update failed and the previous policy could not be restored",
+                    {"update_error": str(update_error), "rollback_error": str(rollback_error)},
+                )
+            raise PortalError(
+                502,
+                "preset_mtls_update_failed",
+                "Preset mTLS update failed; the previous policy was restored",
+                {"detail": str(update_error)},
+            )
+        return {
+            "status": "applied",
+            "preset": preset_name,
+            "policy": policy_result,
+            "mtls": mtls_result,
+            "allowed_ids": target_mtls_ids,
+        }
 
     async def get_mtls_policy(self, request_id):
         # type: (str) -> Dict[str, Any]

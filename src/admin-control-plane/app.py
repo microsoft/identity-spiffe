@@ -214,6 +214,7 @@ async def admin_proxy(mgmt_path: str, request: Request):
             resp = await client.request(
                 method=request.method,
                 url=url,
+                params=request.query_params,
                 headers=headers,
                 content=body or None,
             )

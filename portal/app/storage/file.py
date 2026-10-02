@@ -14,9 +14,10 @@ logger = logging.getLogger("isp-portal.storage.file")
 class FilePolicyConfigStore(PolicyConfigStore):
     """Atomic file-backed config store."""
 
-    def __init__(self, path):
+    def __init__(self, path, strict=False):
         # type: (str) -> None
         self.path = Path(path)
+        self.strict = strict
 
     def _read(self):
         # type: () -> List[Dict[str, Any]]
@@ -26,11 +27,17 @@ class FilePolicyConfigStore(PolicyConfigStore):
             with self.path.open(encoding="utf-8") as handle:
                 data = json.load(handle)
             if not isinstance(data, list):
+                if self.strict:
+                    raise ValueError("Stored settings file is not a list")
                 logger.warning("Policy config file is not a list: %s", self.path)
                 return []
+            if self.strict and any(not isinstance(item, dict) for item in data):
+                raise ValueError("Stored settings file has invalid entries")
             return [item for item in data if isinstance(item, dict)]
         except (json.JSONDecodeError, OSError):
             logger.exception("Failed to read policy config file")
+            if self.strict:
+                raise
             corrupt = self.path.with_suffix(".corrupt")
             try:
                 self.path.replace(corrupt)

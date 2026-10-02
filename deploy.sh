@@ -62,8 +62,31 @@ trap '_deploy_err_trap "$LINENO" "$BASH_COMMAND"' ERR
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
 
+# Entra provisioning requires requests and PyYAML. Prefer the caller's Python,
+# but fall back to Azure CLI's bundled environment when system package policy
+# prevents installing those modules.
+DEPLOY_PYTHON="${DEPLOY_PYTHON:-$(command -v python3)}"
+if ! "$DEPLOY_PYTHON" -c 'import requests, yaml' >/dev/null 2>&1; then
+    AZURE_CLI_PYTHON=""
+    if command -v brew >/dev/null 2>&1; then
+        AZURE_CLI_PYTHON="$(brew --prefix azure-cli 2>/dev/null)/libexec/bin/python3"
+    fi
+    if [ -z "$AZURE_CLI_PYTHON" ] || [ ! -x "$AZURE_CLI_PYTHON" ] ||
+       ! "$AZURE_CLI_PYTHON" -c 'import requests, yaml' >/dev/null 2>&1; then
+        echo "ERROR: Python with the requests and PyYAML modules is required." >&2
+        echo "Set DEPLOY_PYTHON to a compatible interpreter and retry." >&2
+        exit 1
+    fi
+    DEPLOY_PYTHON="$AZURE_CLI_PYTHON"
+fi
+python3() {
+    "$DEPLOY_PYTHON" "$@"
+}
+echo "✅ Deployment Python: ${DEPLOY_PYTHON}"
+
 # shellcheck source=scripts/lib/deploy-config.sh
 source "${SCRIPT_DIR}/scripts/lib/deploy-config.sh"
+PORTAL_IMAGE_TAG="${IMAGE_TAG}-$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD)"
 # shellcheck source=scripts/lib/azure-helpers.sh
 source "${SCRIPT_DIR}/scripts/lib/azure-helpers.sh"
 # shellcheck source=scripts/lib/entra-scope.sh
@@ -606,28 +629,38 @@ PY
 
 build_portal_images() {
     local cache_bust_val
+    local build_context
     cache_bust_val=$(date +%s)
+    build_context=$(mktemp -d "${TMPDIR:-/tmp}/identity-spiffe-portal-build.XXXXXX")
+    git archive HEAD portal securityportal-mock src/shared .dockerignore | tar -x -C "$build_context"
 
     echo ""
     echo "🌐 Building portal images..."
-    echo "   Building isp-portal:${IMAGE_TAG} (cache-bust=${cache_bust_val})..."
-    az acr build \
+    echo "   Building isp-portal:${PORTAL_IMAGE_TAG} (cache-bust=${cache_bust_val})..."
+    if ! az acr build \
         --registry "$ACR_NAME" \
-        --image "isp-portal:${IMAGE_TAG}" \
+        --image "isp-portal:${PORTAL_IMAGE_TAG}" \
         --file portal/Dockerfile \
         --build-arg "CACHE_BUST=${cache_bust_val}" \
-        --build-arg "BUILD_VERSION=${IMAGE_TAG}" \
-        .
+        --build-arg "BUILD_VERSION=${PORTAL_IMAGE_TAG}" \
+        "$build_context"; then
+        rm -rf "$build_context"
+        return 1
+    fi
 
-    echo "   Building securityportal-mock:${IMAGE_TAG} (cache-bust=${cache_bust_val})..."
-    az acr build \
+    echo "   Building securityportal-mock:${PORTAL_IMAGE_TAG} (cache-bust=${cache_bust_val})..."
+    if ! az acr build \
         --registry "$ACR_NAME" \
-        --image "securityportal-mock:${IMAGE_TAG}" \
+        --image "securityportal-mock:${PORTAL_IMAGE_TAG}" \
         --file securityportal-mock/Dockerfile \
         --build-arg "CACHE_BUST=${cache_bust_val}" \
-        --build-arg "BUILD_VERSION=${IMAGE_TAG}" \
-        .
+        --build-arg "BUILD_VERSION=${PORTAL_IMAGE_TAG}" \
+        "$build_context"; then
+        rm -rf "$build_context"
+        return 1
+    fi
 
+    rm -rf "$build_context"
     echo "✅ Portal images built"
 }
 
@@ -1200,6 +1233,13 @@ fi
 AZD_VALUES_GRAPH=$(azd_env_load)
 GRAPH_CLIENT_ID=$(azd_env_get_from_blob "$AZD_VALUES_GRAPH" "ENTRA_AGENTID_CLIENT_ID")
 GRAPH_CLIENT_SECRET=$(azd_env_get_from_blob "$AZD_VALUES_GRAPH" "ENTRA_AGENTID_CLIENT_SECRET")
+AZD_CA_RISK_PROVIDER=$(azd_env_get_from_blob "$AZD_VALUES_GRAPH" "CA_RISK_PROVIDER")
+CA_RISK_PROVIDER="${CA_RISK_PROVIDER:-${AZD_CA_RISK_PROVIDER:-entra}}"
+if [ "$CA_RISK_PROVIDER" != "entra" ] && [ "$CA_RISK_PROVIDER" != "sidecar" ]; then
+    echo "ERROR: CA_RISK_PROVIDER must be 'entra' or 'sidecar' (got '$CA_RISK_PROVIDER')." >&2
+    exit 1
+fi
+echo "   CA risk provider: ${CA_RISK_PROVIDER}"
 if [ -n "${GRAPH_CLIENT_ID:-}" ] && [ -n "${GRAPH_CLIENT_SECRET:-}" ]; then
     echo "   Graph API credentials: ✓ (CA policy evaluation enabled)"
 else
@@ -1548,6 +1588,7 @@ for AGENT in "${AGENTS[@]}"; do
         export MI_CLIENT_ID_EMPLOYEE_MENUS="$MI_CLIENT_ID_EMPLOYEE_MENUS"
         export GRAPH_CLIENT_ID="$GRAPH_CLIENT_ID"
         export GRAPH_CLIENT_SECRET="$GRAPH_CLIENT_SECRET"
+        export CA_RISK_PROVIDER="$CA_RISK_PROVIDER"
         export ENTRA_AGENT_OID_BUDGET_REPORT="$ENTRA_AGENT_OID_BUDGET_REPORT"
         export ENTRA_AGENT_OID_BUDGET_APPROVAL="$ENTRA_AGENT_OID_BUDGET_APPROVAL"
         export ENTRA_AGENT_OID_ADMIN_CONTROL_PLANE="$ENTRA_AGENT_OID_ADMIN_CONTROL_PLANE"
@@ -1591,6 +1632,7 @@ oauth2_vars = {
 # Graph API credentials for CA policy evaluation (provisioner app)
 graph_client_id = os.environ.get("GRAPH_CLIENT_ID", "")
 graph_client_secret = os.environ.get("GRAPH_CLIENT_SECRET", "")
+ca_risk_provider = os.environ.get("CA_RISK_PROVIDER", "entra")
 
 with open(yaml_file) as f:
     app = yaml.safe_load(f)
@@ -1686,6 +1728,7 @@ for container in containers:
                        'A2A_TARGET_URL_BUDGET_APPROVAL',
                        'ADMIN_CONTROL_PLANE_ENDPOINT',
                        'RISK_STORE_URL',
+                       'CA_RISK_PROVIDER',
                        'GRAPH_CLIENT_ID', 'GRAPH_CLIENT_SECRET',
                        'ENTRA_AGENT_ID_BUDGET_REPORT', 'ENTRA_AGENT_ID_BUDGET_APPROVAL',
                        'ENTRA_AGENT_ID_EMPLOYEE_MENUS'}
@@ -1755,6 +1798,7 @@ for container in containers:
         if graph_client_id and graph_client_secret:
             env_list.append({'name': 'GRAPH_CLIENT_ID', 'value': graph_client_id})
             env_list.append({'name': 'GRAPH_CLIENT_SECRET', 'value': graph_client_secret})
+        env_list.append({'name': 'CA_RISK_PROVIDER', 'value': ca_risk_provider})
         container['env'] = env_list
         break
 
@@ -2220,8 +2264,16 @@ if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
     # Derive storage account name from resource group
     STORAGE_ACCOUNT=$(az storage account list --resource-group "$RG" --query "[0].name" -o tsv 2>/dev/null)
     if [ -z "$STORAGE_ACCOUNT" ]; then
-        echo "   ⚠️  Storage account not found; blob-backed stores will not be configured"
+        echo "ERROR: Storage account not found; durable portal settings are required." >&2
+        exit 1
     fi
+    source "${SCRIPT_DIR}/scripts/lib/portal-settings.sh"
+    RUNTIME_SETTINGS_CONTAINER=$(azd_env_get_from_blob "$AZD_VALUES" "PORTAL_RUNTIME_SETTINGS_CONTAINER")
+    RUNTIME_SETTINGS_CONTAINER="${RUNTIME_SETTINGS_CONTAINER:-portal-runtime-settings}"
+    RUNTIME_SETTINGS_BLOB=$(azd_env_get_from_blob "$AZD_VALUES" "PORTAL_RUNTIME_SETTINGS_BLOB_NAME")
+    RUNTIME_SETTINGS_BLOB="${RUNTIME_SETTINGS_BLOB:-settings.json}"
+    ensure_portal_settings_blob "$STORAGE_ACCOUNT" "$RUNTIME_SETTINGS_CONTAINER" \
+        "$RUNTIME_SETTINGS_BLOB" "${REPO_ROOT}/portal/default-risk-settings.json"
 
     portal_env_vars=(
         "ADMIN_CP_URL=${ADMIN_CP_URL}"
@@ -2232,6 +2284,7 @@ if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
         "ISP_ADMIN_GROUP_ID=${ISP_ADMIN_GROUP_ID}"
         "ISP_VIEWER_GROUP_ID=${ISP_VIEWER_GROUP_ID}"
         "PORTAL_MODE=cloud"
+        "CA_RISK_PROVIDER=${CA_RISK_PROVIDER}"
     )
     if [ -n "$STORAGE_ACCOUNT" ]; then
         portal_env_vars+=(
@@ -2239,6 +2292,8 @@ if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
             "POLICY_CONFIG_BLOB_ACCOUNT_URL=https://${STORAGE_ACCOUNT}.blob.core.windows.net/"
             "POLICY_CONFIG_BLOB_CONTAINER=portal-policy-configs"
             "POLICY_CONFIG_BLOB_NAME=policy-configs.json"
+            "RUNTIME_SETTINGS_BLOB_CONTAINER=${RUNTIME_SETTINGS_CONTAINER}"
+            "RUNTIME_SETTINGS_BLOB_NAME=${RUNTIME_SETTINGS_BLOB}"
             "EXTERNAL_AGENT_STORE_PROVIDER=blob"
             "EXTERNAL_AGENT_STORE_BLOB_ACCOUNT_URL=https://${STORAGE_ACCOUNT}.blob.core.windows.net/"
             "EXTERNAL_AGENT_STORE_BLOB_CONTAINER=portal-external-agents"
@@ -2276,7 +2331,7 @@ if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
         az containerapp update \
         --name isp-portal \
         --resource-group "$RG" \
-        --image "${ACR_SERVER}/isp-portal:${IMAGE_TAG}" \
+        --image "${ACR_SERVER}/isp-portal:${PORTAL_IMAGE_TAG}" \
         --set-env-vars "${portal_env_vars[@]}"
 
     run_az_step "Failed to set securityportal-mock secrets" \
@@ -2291,7 +2346,7 @@ if [ -n "$PORTAL_AUTH_CLIENT_ID" ] || [ -n "$ADMIN_CP_URL" ]; then
         az containerapp update \
         --name securityportal-mock \
         --resource-group "$RG" \
-        --image "${ACR_SERVER}/securityportal-mock:${IMAGE_TAG}" \
+        --image "${ACR_SERVER}/securityportal-mock:${PORTAL_IMAGE_TAG}" \
         --set-env-vars "${securityportal_env_vars[@]}"
 
     echo "✅ Portal Container Apps updated"

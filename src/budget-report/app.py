@@ -316,9 +316,9 @@ def _spiffe_id_matches_caller(spiffe_id: str, caller_identifier: str) -> bool:
     return False
 
 
-async def _query_risk_store(caller_identifier: str) -> str:
+async def _query_risk_store(caller_identifier: str):
     if not ADMIN_CONTROL_PLANE_ENDPOINT:
-        return "low"
+        return None
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             headers = {}
@@ -346,7 +346,7 @@ async def _query_risk_store(caller_identifier: str) -> str:
                                 return risk
     except Exception as e:
         logger.warning(f"Risk store query failed: {e}")
-    return "low"
+    return None
 
 
 async def _query_caller_ca(caller_identifier: str) -> dict:
@@ -384,11 +384,12 @@ async def _call_target(target: str):
 
     headers = {"X-Caller-Agent": agent_name, "Content-Type": "application/json"}
     entra_token = await get_entra_token_async()
+    last_err = get_last_token_error()
     if entra_token:
         headers["Authorization"] = f"Bearer {entra_token}"
     else:
         # Token acquisition failed — check for specific CA policy block error
-        is_ca_block = get_last_token_error() and "AADSTS53003" in get_last_token_error()
+        is_ca_block = last_err and "AADSTS53003" in last_err
         return {
             "caller": agent_name,
             "target": target,
@@ -396,7 +397,7 @@ async def _call_target(target: str):
             "response": {
                 "error": "ca_policy_blocked" if is_ca_block else "token_acquisition_failed",
                 "enforcement_layer": "conditional_access" if is_ca_block else "authentication",
-                "detail": get_last_token_error() or "No Entra token available",
+                "detail": sanitize_token_error(last_err),
                 "message": "Conditional Access policy denied token issuance for this agent (AADSTS53003). "
                            "The agent is flagged as high-risk and the CA policy blocks high-risk agents."
                            if is_ca_block else "Could not acquire an Entra token for A2A authentication.",

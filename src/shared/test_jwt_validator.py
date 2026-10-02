@@ -9,8 +9,13 @@ Tests cover all 6 failure modes per the engineering review:
 5. No groups claim → PermissionError
 6. JWKS fetch failure → ValueError (fail-closed)
 """
+import importlib.util
+import json
+import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import jwt as pyjwt
@@ -45,7 +50,7 @@ VIEWER_GROUP = "viewer-group-oid"
 ISSUER = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0"
 
 
-def _make_token(claims=None, key=None, headers=None):
+def _make_token(claims=None, key=None, headers=None, omit_claims=()):
     """Create a signed JWT for testing."""
     now = int(time.time())
     default_claims = {
@@ -62,6 +67,8 @@ def _make_token(claims=None, key=None, headers=None):
     }
     if claims:
         default_claims.update(claims)
+    for claim in omit_claims:
+        default_claims.pop(claim, None)
     return pyjwt.encode(
         default_claims,
         key or _private_pem,
@@ -81,6 +88,82 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 from jwt_validator import EntraJWTValidator
+
+
+_security_spec = importlib.util.spec_from_file_location(
+    "securityportal_jwt_validator",
+    Path(__file__).resolve().parents[2] / "securityportal-mock" / "jwt_validator.py",
+)
+_security_validator = importlib.util.module_from_spec(_security_spec)
+_security_spec.loader.exec_module(_security_validator)
+
+
+class TestExpirationValidation(unittest.TestCase):
+    """Both portal validator entry points must reject expiration-less tokens."""
+
+    @classmethod
+    def setUpClass(cls):
+        key = json.loads(pyjwt.algorithms.RSAAlgorithm.to_jwk(_public_key))
+        key.update(kid="test-kid", use="sig", alg="RS256")
+        body = json.dumps({"keys": [key]}).encode()
+
+        class JWKSHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, format, *args):
+                pass
+
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), JWKSHandler)
+        cls.addClassCleanup(cls.server.server_close)
+        thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        thread.start()
+        cls.addClassCleanup(thread.join, 5)
+        cls.addClassCleanup(cls.server.shutdown)
+        cls.jwks_uri = "http://127.0.0.1:{0}/keys".format(cls.server.server_port)
+
+    def test_expiration_claims(self):
+        now = int(time.time())
+        cases = [
+            ("missing", {}, ("exp",), pyjwt.MissingRequiredClaimError),
+            ("null", {"exp": None}, (), pyjwt.MissingRequiredClaimError),
+            ("invalid_string", {"exp": "not-a-date"}, (), pyjwt.DecodeError),
+            ("nan", {"exp": float("nan")}, (), pyjwt.DecodeError),
+            ("infinite", {"exp": float("inf")}, (), OverflowError),
+            ("negative_infinite", {"exp": float("-inf")}, (), OverflowError),
+            ("array", {"exp": [now + 3600]}, (), TypeError),
+            ("object", {"exp": {"seconds": now + 3600}}, (), TypeError),
+            ("boolean", {"exp": True}, (), pyjwt.ExpiredSignatureError),
+            ("zero", {"exp": 0}, (), pyjwt.ExpiredSignatureError),
+            ("expired", {"exp": now - 3600}, (), pyjwt.ExpiredSignatureError),
+            ("valid", {"exp": now + 3600}, (), None),
+            ("fractional", {"exp": now + 3600.5}, (), None),
+            ("numeric_string", {"exp": str(now + 3600)}, (), None),
+            ("no_optional_dates", {"exp": now + 3600}, ("iat", "nbf"), None),
+        ]
+        for validator_cls in (
+            EntraJWTValidator,
+            _security_validator.EntraJWTValidator,
+        ):
+            validator = validator_cls(tenant_id=TENANT_ID, client_id=CLIENT_ID)
+            validator.jwks_uri = self.jwks_uri
+            # Verify the real cryptographic healthy control before mutations.
+            self.assertEqual(validator.validate_token(_make_token())["aud"], CLIENT_ID)
+            for name, claims, omitted, error in cases:
+                with self.subTest(validator=validator_cls.__module__, case=name):
+                    token = _make_token(claims, omit_claims=omitted)
+                    if error is None:
+                        decoded = validator.validate_token(token)
+                        self.assertEqual(decoded["exp"], claims["exp"])
+                    else:
+                        with self.assertRaises(error) as ctx:
+                            validator.validate_token(token)
+                        if error is pyjwt.MissingRequiredClaimError:
+                            self.assertEqual(ctx.exception.claim, "exp")
 
 
 class TestJWTValidation(unittest.TestCase):

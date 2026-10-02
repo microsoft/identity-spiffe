@@ -47,16 +47,6 @@ class ProvisionerBootstrapError(RuntimeError):
     """Raised when the provisioner app cannot be created or consented."""
 
 
-def _client_secret_credential():
-    try:
-        from azure.identity import ClientSecretCredential
-    except ImportError as exc:
-        raise ProvisionerBootstrapError(
-            "azure-identity is required. Install with 'pip install azure-identity'."
-        ) from exc
-    return ClientSecretCredential
-
-
 def run_az(args, capture=True):
     result = subprocess.run(["az"] + args, capture_output=capture, text=True)
     return result.returncode, result.stdout.strip(), result.stderr.strip()
@@ -438,19 +428,44 @@ def ensure_app_registration(required_values, wait_for_propagation=True):
 
 
 def get_graph_token(required_values=None, wait_for_propagation=True):
+    import requests
+
     if required_values is None:
         required_values = build_required_permission_values(include_ca=True)
     client_id, client_secret, tenant_id = ensure_app_registration(
         required_values,
         wait_for_propagation=wait_for_propagation,
     )
-    credential_cls = _client_secret_credential()
-    credential = credential_cls(
-        tenant_id=tenant_id,
-        client_id=client_id,
-        client_secret=client_secret,
-    )
-    return credential.get_token("https://graph.microsoft.com/.default").token
+    try:
+        response = requests.post(
+            f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "scope": "https://graph.microsoft.com/.default",
+                "grant_type": "client_credentials",
+            },
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        raise ProvisionerBootstrapError(
+            f"Graph token request failed: {exc}"
+        ) from exc
+    if response.status_code != 200:
+        raise ProvisionerBootstrapError(
+            f"Graph token request returned HTTP {response.status_code}"
+        )
+    try:
+        token = response.json().get("access_token", "")
+    except ValueError as exc:
+        raise ProvisionerBootstrapError(
+            "Graph token response was not valid JSON"
+        ) from exc
+    if not token:
+        raise ProvisionerBootstrapError(
+            "Graph token response did not contain an access token"
+        )
+    return token
 
 
 def verify_graph_preflight(token, checks):

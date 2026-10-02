@@ -1196,6 +1196,11 @@
         var _securityPortalToken = null;
         var _securityPortalUser = null;
 
+        function securityPortalSelectedAccount() {
+            var accounts = _securityPortalMsal.getAllAccounts();
+            return _securityPortalMsal.getActiveAccount() || (accounts.length === 1 ? accounts[0] : null);
+        }
+
         function securityPortalEscapeHtml(s) {
             var d = document.createElement('div'); d.appendChild(document.createTextNode(s || '')); return d.innerHTML;
         }
@@ -1216,10 +1221,13 @@
                 cache: { cacheLocation: 'sessionStorage' }
             });
             var resp = await _securityPortalMsal.handleRedirectPromise();
-            if (resp) _securityPortalToken = resp.accessToken;
-            var accounts = _securityPortalMsal.getAllAccounts();
-            if (accounts.length > 0) {
-                await securityPortalAcquireToken(accounts[0]);
+            if (resp) {
+                _securityPortalToken = resp.accessToken;
+                _securityPortalMsal.setActiveAccount(resp.account);
+            }
+            var account = securityPortalSelectedAccount();
+            if (account) {
+                await securityPortalAcquireToken(account);
             } else {
                 document.getElementById('sp-auth-splash').style.display = 'flex';
                 throw 'not_authenticated';
@@ -1259,7 +1267,7 @@
             if (!_securityPortalMsal) return;
             document.getElementById('sp-auth-loading').style.display = 'block';
             document.getElementById('sp-signin-btn').style.display = 'none';
-            _securityPortalMsal.loginRedirect({ scopes: ['openid', 'profile'] });
+            _securityPortalMsal.loginRedirect({ scopes: ['openid', 'profile'], prompt: 'select_account' });
         }
 
         function securityPortalSignOut() {
@@ -1274,6 +1282,7 @@
                 '<div class="sp-user-avatar">' + securityPortalEscapeHtml(initials) + '</div>' +
                 '<div><div class="sp-user-name">' + securityPortalEscapeHtml(_securityPortalUser.name) + '</div>' +
                 '<div class="sp-user-role">' + securityPortalEscapeHtml(_securityPortalUser.role) + '</div></div>' +
+                '<button class="sp-signout" onclick="securityPortalSignIn()">Switch account</button>' +
                 '<button class="sp-signout" onclick="securityPortalSignOut()">Sign out</button>';
             b.style.display = 'flex';
         }
@@ -1288,9 +1297,9 @@
             }
             return _origFetch.call(window, url, opts).then(function(resp) {
                 if (resp.status === 401 && !opts._retried && _securityPortalMsal) {
-                    var accounts = _securityPortalMsal.getAllAccounts();
-                    if (accounts.length > 0) {
-                        return securityPortalAcquireToken(accounts[0]).then(function() {
+                    var account = securityPortalSelectedAccount();
+                    if (account) {
+                        return securityPortalAcquireToken(account).then(function() {
                             opts._retried = true;
                             opts.headers = Object.assign({}, opts.headers || {});
                             opts.headers['Authorization'] = 'Bearer ' + _securityPortalToken;

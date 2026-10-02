@@ -31,8 +31,7 @@ import time
 try:
     import httpx
 except ImportError:
-    print("❌ httpx not installed. Run: pip install httpx")
-    sys.exit(1)
+    import requests as httpx
 
 
 def get_azd_env():
@@ -625,16 +624,19 @@ def reset_risk_baseline(control_plane_url, env):
     bp_oid = env.get("ENTRA_BLUEPRINT_OBJECT_ID", "unknown-bp")
     report_oid = env.get("ENTRA_AGENT_ID_BUDGET_REPORT", "unknown-report")
     approval_oid = env.get("ENTRA_AGENT_ID_BUDGET_APPROVAL", "unknown-approval")
+    control_plane_oid = env.get("ENTRA_AGENT_ID_ADMIN_CONTROL_PLANE", "unknown-control-plane")
     mgmt_api_key = env.get("MGMT_API_KEY", "")
 
     report_spiffe = f"spiffe://aim.microsoft.com/ests/bp/{bp_oid}/aid/{report_oid}"
     approval_spiffe = f"spiffe://aim.microsoft.com/ests/bp/{bp_oid}/aid/{approval_oid}"
+    control_plane_spiffe = f"spiffe://aim.microsoft.com/ests/bp/{bp_oid}/aid/{control_plane_oid}"
 
     print("─── Baseline Reset ───")
     print("  Resetting caller risk levels to LOW before verification...")
 
     # Phase 1: Reset sidecar risk store
     if control_plane_url:
+        set_agent_risk(control_plane_url, control_plane_spiffe, "low", mgmt_api_key)
         set_agent_risk(control_plane_url, report_spiffe, "low", mgmt_api_key)
         set_agent_risk(control_plane_url, approval_spiffe, "low", mgmt_api_key)
     else:

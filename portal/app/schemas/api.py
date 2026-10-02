@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 
 class HttpMethod(str, Enum):
@@ -22,6 +22,7 @@ class RiskLevel(str, Enum):
 class FixType(str, Enum):
     MTLS_REMOVE = "mtls-remove"
     RBAC_POLICY = "rbac-policy"
+    OAUTH_JWT = "oauth-jwt"
 
 
 class ExecuteRequest(BaseModel):
@@ -37,6 +38,14 @@ class ExecuteA2ARequest(BaseModel):
 
 class MTLSPolicyUpdate(BaseModel):
     allowed_ids: List[str]
+
+
+class RiskSettingUpdate(BaseModel):
+    enabled: StrictBool
+
+
+class RiskCacheUpdate(BaseModel):
+    seconds: StrictInt = Field(ge=0, le=9223372036)
 
 
 class PolicyConfigCreate(BaseModel):

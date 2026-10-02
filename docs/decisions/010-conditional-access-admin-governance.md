@@ -1,6 +1,6 @@
 # ADR-010: Conditional Access as the Admin Governance Layer
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** March 2026
 **Deciders:** Project contributors
 
@@ -72,13 +72,15 @@ Agent identity as CA subject is **already deployed to 1,000+ customers.** This i
 - The [CA optimization agent](https://learn.microsoft.com/en-us/entra/security-copilot/conditional-access-agent-optimization) already scans for agent coverage gaps — 73% of customers using it have improved their Zero Trust posture
 - The [What If tool](https://learn.microsoft.com/en-us/entra/identity/conditional-access/what-if-tool) already supports agent identity simulation
 
-## Implementation Path
+## Implementation Status
 
-**Phase 1 (in production):** Token-time CA evaluation on agent tokens. Engineering cost: minimal — ensure agent platform identities register as Entra Agent ID constructs.
+The repository provisions token-time Conditional Access for Agent Identities
+and demonstrates post-token governance in the sidecar and direct A2A
+applications. Generic evaluation of CA application and service-principal
+filters is not complete.
 
-**Phase 2 (Q1 FY27):** Data-plane CA enforcement in sidecar. CA evaluation client in ingress pipeline, claims inspection (`acrs`/`capolids`), real-time CA endpoint calls, claims challenge flow. Engineering cost: moderate.
-
-**Phase 3 (Q2 FY27):** Unified policy visibility, What If integration, bidirectional policy awareness. Sign-in logs show both token-time and data-plane CA results.
+The remaining implementation and documentation work is tracked in
+[#31](https://github.com/microsoft/identity-spiffe/issues/31).
 
 See `docs/architecture/admin-governance-layer.md` for technical details — diagrams, YAML schema, enforcement matrix, integration design.
 

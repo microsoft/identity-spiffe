@@ -35,6 +35,7 @@ Viewer and admin roles can read operational state:
 | `/api/identity-mapping` | `GET` | viewer or admin |
 | `/api/ca-status` | `GET` | viewer or admin |
 | `/api/enforcement-matrix` | `GET` | viewer or admin |
+| `/api/settings/risk` | `GET` | viewer or admin |
 
 Admin-only mutation and execution routes:
 
@@ -52,6 +53,9 @@ Admin-only mutation and execution routes:
 | `/api/agent-risk` | `PUT` | Update risk/governance state |
 | `/api/flush-all-tokens` | `POST` | Flush cached tokens |
 | `/api/sync-attributes` | `POST` | Pull Entra attributes into portal state |
+| `/api/settings/risk-signal` | `PUT` | Set portal monitoring with `{"enabled": bool}` |
+| `/api/settings/risk-enforcement` | `PUT` | Set gateway Entra enforcement with `{"enabled": bool}` |
+| `/api/settings/risk-cache` | `PUT` | Set maximum evidence age with `{"seconds": integer}`; default 90, zero checks every call |
 
 ## Admin Control Plane
 
@@ -82,10 +86,19 @@ Key behaviors:
 | `/mgmt/mtls-policy` | `GET`, `PUT` | transport allow-list state |
 | `/mgmt/oauth-status` | `GET` | OAuth/JWT status |
 | `/mgmt/agent-risk` | `GET`, `PUT` | governance risk state |
+| `/mgmt/entra-risk` | `GET` | Gateway Entra/effective risk evidence; optional `spiffe_id` query |
 | `/mgmt/agent-tags` | `GET` | synced tag state |
 | `/mgmt/ca-policy-effective` | `GET` | effective CA-driven state |
 
 All of those routes are guarded by `X-Spiffe-Admin-Key`.
+
+After a sidecar restart, the in-memory risk store has no trusted entries and
+normal management requests fail closed. The exact `admin-control-plane`
+SPIFFE identity may still call `PUT /mgmt/agent-risk` to establish explicit
+risk evidence. In Entra runtime mode, this manual write cannot clear or replace
+Entra evidence. This recovery exception does not apply to any other identity,
+method, or management route, and a disabled control-plane identity remains
+blocked.
 
 ## Contract Guidance
 

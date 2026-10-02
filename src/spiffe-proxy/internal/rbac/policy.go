@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/microsoft/identity-spiffe/src/spiffe-proxy/internal/ca"
 	"gopkg.in/yaml.v3"
 )
 
@@ -48,11 +49,20 @@ type Rule struct {
 // This is Layer 4 — admin authority that supersedes developer policies.
 // Maps to Entra Conditional Access constructs:
 //   - target_agent_tag → Custom security attribute on the resource (this agent)
-//   - risk_enforcement → Where risk is checked ("sts", "data_plane", or "sts_and_data_plane")
+//   - risk_enforcement → "off" explicitly disables only local risk checks;
+//     all other values preserve risk enforcement.
 type AdminGovernance struct {
-	Enabled         bool   `yaml:"enabled"            json:"enabled"`
-	TargetAgentTag  string `yaml:"target_agent_tag"   json:"target_agent_tag"`
-	RiskEnforcement string `yaml:"risk_enforcement"   json:"risk_enforcement"`
+	Enabled          bool   `yaml:"enabled"            json:"enabled"`
+	TargetAgentTag   string `yaml:"target_agent_tag"   json:"target_agent_tag"`
+	RiskEnforcement  string `yaml:"risk_enforcement"   json:"risk_enforcement"`
+	RiskCacheSeconds *int64 `yaml:"risk_cache_seconds,omitempty" json:"risk_cache_seconds,omitempty"`
+}
+
+func (g AdminGovernance) RiskCacheLifetime() time.Duration {
+	if g.RiskCacheSeconds == nil {
+		return ca.DefaultRiskCacheSeconds * time.Second
+	}
+	return time.Duration(*g.RiskCacheSeconds) * time.Second
 }
 
 // CAPolicy defines the Conditional Access settings for a single caller.
@@ -271,6 +281,9 @@ func validateRulePath(path string) error {
 
 // Validate checks that the policy is well-formed.
 func (p *Policy) Validate() error {
+	if seconds := p.AdminGovernance.RiskCacheSeconds; seconds != nil && (*seconds < 0 || *seconds > ca.MaxRiskCacheSeconds) {
+		return fmt.Errorf("risk_cache_seconds must be between 0 and %d", ca.MaxRiskCacheSeconds)
+	}
 	if p.Version == "" {
 		return fmt.Errorf("version is required")
 	}

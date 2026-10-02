@@ -40,6 +40,7 @@ Those checks are intentionally independent. A caller that clears RBAC can still 
 - [Enforcement Flow](architecture/enforcement-flow.md): request-by-request examples of allow and deny paths.
 - [Transport mTLS](architecture/layers/transport-mtls.md): Layer 1 design, allow lists, and failure modes.
 - [RBAC Authorization](architecture/layers/rbac-authorization.md): Layer 2 policy model and management behavior.
+- [Hierarchical SPIFFE Namespace Authorization](architecture/hierarchical-spiffe-namespace-authorization.md): Product-defined namespace hierarchy, Blueprint inheritance, and caller binding specification.
 - [OAuth2 and JWT](architecture/layers/oauth-jwt.md): Layer 3 token validation and Entra identity proof.
 - [Conditional Access Governance](architecture/layers/conditional-access.md): Layer 4 admin controls, risk, and custom attributes.
 - [Management APIs](reference/management-apis.md): portal, admin-control-plane, and backend management endpoints.

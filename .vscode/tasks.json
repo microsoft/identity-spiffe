@@ -1,0 +1,69 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Capture production Management Portal admin test session",
+			"type": "shell",
+			"command": "tests/.venv/bin/python",
+			"args": [
+				"tests/browser/auth_setup.py",
+				"--config",
+				"tests/config.local.json",
+				"--portal",
+				"management",
+				"--role",
+				"admin",
+				"--auto-capture",
+				"--status-output",
+				"tests/browser/artifacts/capture-management-admin.json"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Capture production Security Portal admin test session",
+			"type": "shell",
+			"command": "tests/.venv/bin/python",
+			"args": [
+				"tests/browser/auth_setup.py",
+				"--config",
+				"tests/config.local.json",
+				"--portal",
+				"security",
+				"--role",
+				"admin",
+				"--auto-capture",
+				"--status-output",
+				"tests/browser/artifacts/capture-security-admin.json"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Run production-safe live test matrix",
+			"type": "shell",
+			"command": "tests/.venv/bin/python",
+			"args": [
+				"tests/run.py",
+				"--profile",
+				"live",
+				"--config",
+				"tests/config.local.json"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Run full local test matrix twice",
+			"type": "shell",
+			"command": "tests/.venv/bin/python",
+			"args": [
+				"tests/check.py",
+				"--repeat",
+				"2"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

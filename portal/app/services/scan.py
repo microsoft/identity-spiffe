@@ -73,6 +73,36 @@ class ScanService:
         if rbac_data:
             default_action = rbac_data.get("default_action", "deny")
             policies = rbac_data.get("policies", [])
+            jwt_disabled_rules = []
+            for entry in policies + rbac_data.get("federated_policies", []):
+                if entry.get("name") == "admin-control-plane":
+                    continue
+                for rule in entry.get("rules", []):
+                    if (
+                        str(rule.get("action", "")).lower() == "allow"
+                        and not bool(rule.get("require_jwt"))
+                    ):
+                        jwt_disabled_rules.append(
+                            "{0}: {1} {2}".format(
+                                entry.get("name", "unknown"),
+                                ",".join(rule.get("methods", [])),
+                                rule.get("path", ""),
+                            )
+                        )
+            if jwt_disabled_rules:
+                findings.append(
+                    {
+                        "id": "oauth-jwt-validation-disabled",
+                        "severity": "CRITICAL",
+                        "category": "OAuth2",
+                        "title": "OAuth2 JWT validation is disabled",
+                        "description": (
+                            "Allowed business routes do not require a validated JWT: {0}"
+                        ).format("; ".join(jwt_disabled_rules)),
+                        "fix_type": "oauth-jwt",
+                        "fix_payload": {},
+                    }
+                )
             if default_action == "allow":
                 hardened_yaml = self.policy_service.build_hardened_rbac_yaml()
                 agent_findings = []
