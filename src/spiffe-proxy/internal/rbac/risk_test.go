@@ -5,18 +5,18 @@ import (
 	"testing"
 )
 
-func TestRiskStore_DefaultLow(t *testing.T) {
+func TestRiskStore_DefaultUnknown(t *testing.T) {
 	rs := NewRiskStore()
-	if got := rs.GetRisk("spiffe://unknown"); got != RiskLow {
-		t.Errorf("expected %q for unknown agent, got %q", RiskLow, got)
+	if got := rs.GetRisk("spiffe://unknown"); got != "unknown" {
+		t.Errorf("expected unknown risk for unknown agent, got %q", got)
 	}
 }
 
 func TestRiskStore_SetAndGet(t *testing.T) {
 	rs := NewRiskStore()
 	prev := rs.SetRisk("spiffe://test", RiskHigh)
-	if prev != RiskLow {
-		t.Errorf("expected previous level %q, got %q", RiskLow, prev)
+	if prev != "unknown" {
+		t.Errorf("expected previous level unknown, got %q", prev)
 	}
 	if got := rs.GetRisk("spiffe://test"); got != RiskHigh {
 		t.Errorf("expected %q, got %q", RiskHigh, got)
@@ -71,6 +71,7 @@ func TestRiskStore_Count(t *testing.T) {
 
 func TestRiskStore_ConcurrentAccess(t *testing.T) {
 	rs := NewRiskStore()
+	rs.SetRisk("spiffe://concurrent", RiskLow)
 	var wg sync.WaitGroup
 
 	// Concurrent writers

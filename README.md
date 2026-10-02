@@ -234,6 +234,7 @@ for how each page maps to a sidecar or control-plane API.
 | `securityportal-mock/` | Mock SOC/risk signal source used by the demo |
 | `infra/` | Bicep modules for Azure infrastructure |
 | `scripts/` | Deployment, Entra bootstrap, federation setup, re-attestation, and validation scripts |
+| [`tests/`](tests/README.md) | Browser E2E, real-code protocol matrix, explicit-target live checks, and human/LLM reports |
 | `docs/` | GitHub Pages documentation and API reference |
 
 ## Documentation
@@ -254,11 +255,33 @@ mkdocs serve
 
 ## Validation
 
-Run the enforcement matrix after deployment:
+Start with the [browser and enforcement harness](tests/README.md) for local
+validation and explicitly configured live checks. Its
+[agent instructions](tests/AGENTS.md) explain how to report the complete matrix,
+including failures and blocked coverage. After installing its prerequisites:
+
+```bash
+python3 tests/run.py --list
+tests/.venv/bin/python tests/run.py --profile local
+tests/.venv/bin/python tests/check.py --repeat 2
+```
+
+Local checks include connected Chromium-to-caller-to-Go-proxy-to-backend
+journeys, plus protocol edge cases, without cloud credentials. The unattended
+gate repeats fresh local environments and reports stability without hiding
+product failures. Live checks require explicit targets and legitimate sessions;
+a local pass is not evidence of live Entra or SPIRE behavior. Existing security
+regressions remain failing checks, not expected failures.
+
+The older deployment validation script remains available:
 
 ```bash
 python3 scripts/test_agents.py
 ```
+
+**Use that legacy script only with separately authorized test fixtures:** it
+resets sidecar and Graph risk, including when selecting transport checks. The new
+harness does not invoke it or clear Graph risk.
 
 Useful operational checks:
 

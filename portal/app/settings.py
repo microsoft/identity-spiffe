@@ -89,11 +89,14 @@ class PortalSettings:
     azure_tenant_id: str = ""
     graph_client_id: str = ""
     graph_client_secret: str = ""
+    ca_risk_provider: str = "entra"
     policy_store_provider: str = "file"
     policy_store_path: str = ""
     policy_store_account_url: str = ""
     policy_store_container: str = ""
     policy_store_blob: str = ""
+    runtime_settings_container: str = "portal-runtime-settings"
+    runtime_settings_blob: str = "settings.json"
     azure_client_id: str = ""
     applicationinsights_connection_string: str = ""
     # External (cross-cloud / federated) agent store
@@ -213,6 +216,14 @@ async def load_settings(config_path):
     azure_tenant_id = os.getenv("AZURE_TENANT_ID", "")
     graph_client_id = os.getenv("GRAPH_CLIENT_ID", "") or os.getenv("ENTRA_AGENTID_CLIENT_ID", "")
     graph_client_secret = os.getenv("GRAPH_CLIENT_SECRET", "") or os.getenv("ENTRA_AGENTID_CLIENT_SECRET", "")
+    ca_risk_provider = os.getenv("CA_RISK_PROVIDER", "entra").lower()
+    if ca_risk_provider not in {"entra", "sidecar"}:
+        raise PortalError(
+            500,
+            "settings_invalid",
+            "CA_RISK_PROVIDER must be 'entra' or 'sidecar'",
+            {"value": ca_risk_provider},
+        )
     appinsights_connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
     azure_client_id = os.getenv("AZURE_CLIENT_ID", "")
 
@@ -254,10 +265,13 @@ async def load_settings(config_path):
             azure_tenant_id=azure_tenant_id,
             graph_client_id=graph_client_id,
             graph_client_secret=graph_client_secret,
+            ca_risk_provider=ca_risk_provider,
             policy_store_provider=policy_store_provider,
             policy_store_account_url=policy_store_account_url,
             policy_store_container=policy_store_container,
             policy_store_blob=policy_store_blob,
+            runtime_settings_container=os.getenv("RUNTIME_SETTINGS_BLOB_CONTAINER", "portal-runtime-settings"),
+            runtime_settings_blob=os.getenv("RUNTIME_SETTINGS_BLOB_NAME", "settings.json"),
             azure_client_id=azure_client_id,
             applicationinsights_connection_string=appinsights_connection_string,
             external_agent_store_provider=ext_store_provider,
@@ -297,6 +311,7 @@ async def load_settings(config_path):
         azure_tenant_id=azure_tenant_id,
         graph_client_id=graph_client_id,
         graph_client_secret=graph_client_secret,
+        ca_risk_provider=ca_risk_provider,
         policy_store_provider=os.getenv("POLICY_CONFIG_STORE_PROVIDER", "file"),
         policy_store_path=os.getenv(
             "POLICY_CONFIG_FILE",

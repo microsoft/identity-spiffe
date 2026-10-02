@@ -34,5 +34,5 @@ A Kubernetes-native review raised OPA/Gatekeeper as a policy enforcement option.
 ## Related
 
 - ADR-001 (Sidecar, Not Gateway) — the runtime enforcement model
-- Dunloe integration (future work) — the strategic PDP direction
+- Dunloe remains outside the current implementation scope
 - `What_is_Microsoft_Entra_Authorization_Dunloe.pdf` — Dunloe product documentation

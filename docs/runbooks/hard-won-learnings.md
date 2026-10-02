@@ -181,7 +181,8 @@ On 2026-03-27, we needed to reconfigure the SPIRE server Docker container to use
 2. Mount `/opt/spire/data/server` as a Docker volume BEFORE first deploy, so the data survives `docker rm`, OR
 3. After `docker rm` + `docker run`, ALWAYS re-run deploy.sh Steps 5-6 to re-attest agents
 
-**TODO:** Mount the SPIRE data directory as a Docker volume in the cloud-init script (`spire-server-vm.bicep`). This is the proper fix — makes the CA persistent across container restarts.
+Durable SPIRE server storage is tracked in
+[#28](https://github.com/microsoft/identity-spiffe/issues/28).
 
 ## 26. `azd deploy <agent>` Kills SPIFFE Sidecars — Use deploy.sh or reattest.sh
 
@@ -255,7 +256,10 @@ This is not a bug — MSAL Python is designed for interactive and confidential c
 
 The spiffe-proxy `entrypoint.sh` currently only supports `CONTAINER_MODE=server` (SPIRE Server) and `CONTAINER_MODE=agent-proxy` (starts embedded SPIRE Agent + proxy). There is no `proxy-only` mode for connecting to an external SPIRE Agent socket.
 
-For SPIFFE federation scenarios where the SPIRE Agent runs as a separate process (e.g., GCP `gcp_iit` attestation), a new container mode or socket override is needed. See `docs/architecture/next-google-cloud-agent-federation.md` for details.
+For SPIFFE federation scenarios where the SPIRE Agent runs as a separate
+process (for example, GCP `gcp_iit` attestation), a new container mode or
+socket override is needed. Productization of this path is tracked in
+[#35](https://github.com/microsoft/identity-spiffe/issues/35).
 
 ## 34. Rapid-Fire Run-Commands Wedge the Guest Agent on Fresh VMs
 

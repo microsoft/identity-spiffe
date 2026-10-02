@@ -2,13 +2,16 @@ package mgmt
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/microsoft/identity-spiffe/src/spiffe-proxy/internal/ca"
 	"github.com/microsoft/identity-spiffe/src/spiffe-proxy/internal/logging"
+	"github.com/microsoft/identity-spiffe/src/spiffe-proxy/internal/rbac"
 )
 
 // dummyHandler returns 200 OK with body "ok" for any request.
@@ -17,6 +20,44 @@ func dummyHandler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+}
+
+func TestAgentRiskMissingIsUnknown(t *testing.T) {
+	s := &Server{riskStore: rbac.NewRiskStore()}
+	for _, path := range []string{"/agent-risk", "/agent-risk?spiffe_id=spiffe://fixture/caller"} {
+		rr := httptest.NewRecorder()
+		s.handleAgentRisk(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		var result map[string]interface{}
+		if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		key := "default_level"
+		if strings.Contains(path, "?") {
+			key = "risk_level"
+		}
+		if result[key] != "unknown" {
+			t.Fatalf("missing risk must be unknown, not safe: %v", result)
+		}
+	}
+}
+
+func TestEffectivePolicyReportsReadiness(t *testing.T) {
+	cache := ca.NewPolicyCache(nil, time.Hour)
+	s := &Server{caPolicyCache: cache}
+	for _, ready := range []bool{false, true} {
+		if ready {
+			cache.SetBlockedRiskLevelsForTest(nil)
+		}
+		rr := httptest.NewRecorder()
+		s.handleCAPolicyEffective(rr, httptest.NewRequest(http.MethodGet, "/ca-policy-effective", nil))
+		var result map[string]interface{}
+		if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result["ready"] != ready {
+			t.Fatalf("effective policy ready=%v, want %v", result["ready"], ready)
+		}
+	}
 }
 
 func TestAuthMiddleware_NoKeySet(t *testing.T) {

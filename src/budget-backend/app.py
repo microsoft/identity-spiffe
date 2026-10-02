@@ -468,6 +468,22 @@ async def mgmt_agent_risk_get(request: Request):
             )
 
 
+@app.get("/mgmt/entra-risk")
+async def mgmt_entra_risk_get(request: Request):
+    _check_mgmt_auth(request)
+    async with httpx.AsyncClient(timeout=35) as client:
+        try:
+            resp = await client.get(
+                f"{MGMT_API_URL}/entra-risk",
+                params=request.query_params,
+                headers={"X-Spiffe-Admin-Key": MGMT_API_KEY},
+            )
+            return JSONResponse(resp.json(), status_code=resp.status_code)
+        except httpx.RequestError:
+            logger.exception("Management Entra risk proxy request failed")
+            return JSONResponse({"error": "mgmt_unreachable"}, status_code=502)
+
+
 @app.put("/mgmt/agent-risk")
 async def mgmt_agent_risk_put(request: Request):
     """Proxy PUT /agent-risk to the sidecar management API."""

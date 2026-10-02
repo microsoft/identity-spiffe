@@ -14,6 +14,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
 
 # Ensure src/ is importable
 SRC_DIR = Path(__file__).resolve().parent
@@ -157,6 +158,48 @@ class TestBudgetBackend(unittest.TestCase):
     def test_budget_submit(self):
         resp = self.client.post("/budget/submit", json={"amount": 1000, "description": "test"})
         self.assertEqual(resp.status_code, 200)
+
+    def _entra_risk_globals(self):
+        endpoint = next((route.endpoint for route in self.app.routes if getattr(route, "path", "") == "/mgmt/entra-risk"), None)
+        self.assertIsNotNone(endpoint, "Missing BudgetBackend Entra risk management bridge")
+        return endpoint.__globals__
+
+    def test_entra_risk_proxy_preserves_identity_query_and_auth(self):
+        globals_ = self._entra_risk_globals()
+        caller = "spiffe://aim.microsoft.com/ests/bp/blueprint/aid/agent"
+        upstream = AsyncMock()
+        upstream.get.return_value = Mock(status_code=200, json=Mock(return_value={"source": "entra", "risks": {caller: "unknown"}}))
+        factory = Mock()
+        factory.return_value.__aenter__ = AsyncMock(return_value=upstream)
+        factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        with patch.dict(globals_, {"MGMT_API_KEY": "bridge-test-key"}), patch.object(globals_["httpx"], "AsyncClient", factory):
+            response = self.client.get("/mgmt/entra-risk", params={"spiffe_id": caller}, headers={"X-Spiffe-Admin-Key": "bridge-test-key"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["risks"], {caller: "unknown"})
+        upstream.get.assert_awaited_once()
+        args, kwargs = upstream.get.await_args
+        self.assertEqual(args[0], globals_["MGMT_API_URL"] + "/entra-risk")
+        self.assertEqual(kwargs["params"].get("spiffe_id"), caller)
+        self.assertEqual(kwargs["headers"], {"X-Spiffe-Admin-Key": "bridge-test-key"})
+
+    def test_entra_risk_proxy_rejects_unauthorized_before_lookup(self):
+        globals_ = self._entra_risk_globals()
+        with patch.dict(globals_, {"MGMT_API_KEY": "bridge-test-key"}), patch.object(globals_["httpx"], "AsyncClient") as factory:
+            response = self.client.get("/mgmt/entra-risk")
+        self.assertEqual(response.status_code, 401)
+        factory.assert_not_called()
+
+    def test_entra_risk_proxy_unreachable_is_not_safe(self):
+        globals_ = self._entra_risk_globals()
+        upstream = AsyncMock()
+        upstream.get.side_effect = globals_["httpx"].ConnectError("unavailable")
+        factory = Mock()
+        factory.return_value.__aenter__ = AsyncMock(return_value=upstream)
+        factory.return_value.__aexit__ = AsyncMock(return_value=None)
+        with patch.dict(globals_, {"MGMT_API_KEY": "bridge-test-key"}), patch.object(globals_["httpx"], "AsyncClient", factory):
+            response = self.client.get("/mgmt/entra-risk", headers={"X-Spiffe-Admin-Key": "bridge-test-key"})
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json(), {"error": "mgmt_unreachable"})
 
 
 class TestBudgetApproval(unittest.TestCase):

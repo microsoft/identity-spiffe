@@ -274,6 +274,38 @@ body { font-family: var(--font); background: var(--bg); color: var(--text-0); mi
 .health-card .h-label { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 .health-card .h-value { font-size: 24px; font-weight: 700; margin-top: 4px; }
 
+/* ── Settings ── */
+.settings-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.settings-card { padding: 24px; display: flex; flex-direction: column; }
+.settings-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.settings-card-header .section-title { margin-bottom: 0; }
+.settings-card > .finding-desc { margin-bottom: 20px; }
+.settings-card .policy-msg { margin: 0 0 20px; }
+.settings-control { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border-light); font-weight: 500; }
+.settings-switch { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+.settings-switch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 1; }
+.settings-track { display: block; width: 100%; height: 100%; background: var(--text-4); border-radius: 10px; transition: background 0.15s; }
+.settings-track::after { content: ''; position: absolute; width: 16px; height: 16px; top: 2px; left: 2px; border-radius: 50%; background: var(--bg-card); transition: transform 0.15s; }
+.settings-switch input:checked + .settings-track { background: var(--blue); }
+.settings-switch input:checked + .settings-track::after { transform: translateX(16px); }
+.settings-switch input:focus-visible + .settings-track { outline: 2px solid var(--blue); outline-offset: 3px; }
+.settings-switch input:disabled { cursor: not-allowed; }
+.settings-switch input:disabled + .settings-track { opacity: 0.5; }
+.settings-note { margin-top: 16px; }
+.settings-info-wrap { display: inline-flex; position: relative; margin-left: 8px; vertical-align: middle; }
+.settings-info { width: 18px; height: 18px; padding: 0; border: 1px solid var(--text-3); border-radius: 50%; background: transparent; color: var(--text-2); font: 600 12px var(--font); cursor: help; }
+.settings-info:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.settings-tooltip { display: none; position: absolute; top: 26px; left: -12px; z-index: 20; width: min(320px, 70vw); padding: 12px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 12px #0003; color: var(--text-1); font-size: 12px; font-weight: 400; line-height: 1.6; }
+.settings-info-wrap:hover .settings-tooltip, .settings-info-wrap:focus-within .settings-tooltip { display: block; }
+.settings-cache { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-light); }
+.settings-cache label { display: block; font-weight: 500; margin-bottom: 8px; }
+.settings-cache-row { display: flex; gap: 8px; }
+.settings-cache input { width: 120px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 2px; font: 13px var(--font); }
+.settings-cache input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+.settings-cache button[type="submit"] { padding: 7px 16px; border: 1px solid var(--blue); border-radius: 2px; background: var(--blue); color: white; font: 13px var(--font); cursor: pointer; }
+.settings-cache :disabled { opacity: 0.6; cursor: not-allowed; }
+@media (max-width: 860px) { .settings-grid { grid-template-columns: 1fr; } }
+
 /* ── Buttons ── */
 .btn-refresh { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-2); padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-family: var(--font); font-weight: 500; }
 .btn-refresh:hover { border-color: var(--blue); color: var(--blue); }
@@ -423,6 +455,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text-0); mi
     </div>
   </div>
   <div class="sidebar-mode live" id="status-dot">LIVE STATUS</div>
+  <div class="sidebar-mode degraded" id="risk-signal-status">PORTAL RISK MONITORING UNKNOWN</div>
   <div class="audit-stream-status closed" id="audit-stream-status" title="Live audit stream">
     <span class="asd-dot"></span><span class="asd-label">Live logs idle</span>
   </div>
@@ -436,6 +469,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text-0); mi
   <button class="nav-btn" data-tab="policy"><span class="nav-icon">&#x1f4dc;</span> Policy Editor</button>
   <button class="nav-btn" data-tab="health"><span class="nav-icon">&#x1f49a;</span> System Health</button>
   <button class="nav-btn" data-tab="oauth"><span class="nav-icon">&#x1f517;</span> Enforcement Layers</button>
+  <button class="nav-btn" data-tab="settings"><span class="nav-icon">&#9881;</span> Settings</button>
   <div class="sidebar-spacer"></div>
 </aside>
 
@@ -464,6 +498,11 @@ var _accessToken = null;
 var _sessionCheckInterval = null;
 var _healthCheckInterval = null;
 
+function selectedAccount() {
+  var accounts = msalInstance.getAllAccounts();
+  return msalInstance.getActiveAccount() || (accounts.length === 1 ? accounts[0] : null);
+}
+
 function escapeHtml(s) {
   var div = document.createElement('div');
   div.appendChild(document.createTextNode(s || ''));
@@ -491,10 +530,11 @@ function initAuth() {
     return msalInstance.handleRedirectPromise().then(function(resp) {
       if (resp) {
         _accessToken = resp.accessToken;
+        msalInstance.setActiveAccount(resp.account);
       }
-      var accounts = msalInstance.getAllAccounts();
-      if (accounts.length > 0) {
-        return acquireTokenAndSetUser(accounts[0]);
+      var account = selectedAccount();
+      if (account) {
+        return acquireTokenAndSetUser(account);
       } else {
         // Not signed in — show splash
         document.getElementById('auth-splash').style.display = 'flex';
@@ -558,7 +598,7 @@ function signIn() {
   if (!msalInstance) return;
   document.getElementById('auth-loading').style.display = 'block';
   document.getElementById('auth-signin-btn').style.display = 'none';
-  msalInstance.loginRedirect({ scopes: ['openid', 'profile'] });
+  msalInstance.loginRedirect({ scopes: ['openid', 'profile'], prompt: 'select_account' });
 }
 
 function signOut() {
@@ -568,9 +608,9 @@ function signOut() {
 
 function refreshSession() {
   if (!msalInstance) return;
-  var accounts = msalInstance.getAllAccounts();
-  if (accounts.length > 0) {
-    acquireTokenAndSetUser(accounts[0]).then(function() {
+  var account = selectedAccount();
+  if (account) {
+    acquireTokenAndSetUser(account).then(function() {
       document.getElementById('session-toast').style.display = 'none';
     });
   }
@@ -592,6 +632,7 @@ function renderUserBanner() {
       '<div class="user-email">' + escapeHtml(currentUser.email) + '</div>' +
     '</div>' +
     '<span class="user-role-badge ' + roleClass + '">' + roleLabel + '</span>' +
+    '<button class="user-signout" onclick="signIn()">Switch account</button>' +
     '<button class="user-signout" onclick="signOut()">Sign out</button>';
   banner.style.display = 'flex';
 }
@@ -600,12 +641,12 @@ function startSessionWatch() {
   if (_sessionCheckInterval) clearInterval(_sessionCheckInterval);
   _sessionCheckInterval = setInterval(function() {
     if (!msalInstance) return;
-    var accounts = msalInstance.getAllAccounts();
-    if (accounts.length === 0) return;
+    var account = selectedAccount();
+    if (!account) return;
     // Check if token will expire soon (within 5 minutes)
     msalInstance.acquireTokenSilent({
       scopes: ['openid', 'profile'],
-      account: accounts[0],
+      account: account,
     }).then(function(resp) {
       _accessToken = resp.idToken || resp.accessToken || '';
       var exp = resp.expiresOn ? resp.expiresOn.getTime() : 0;
@@ -647,7 +688,32 @@ function updateStatusBadge() {
   dot.textContent = 'LIVE HEALTHY';
 }
 
+function updateRiskSignalBadge() {
+  var badge = document.getElementById('risk-signal-status');
+  var signal = state.riskSettings && state.riskSettings.signal;
+  if (!badge) return;
+  var status = signal ? signal.status : 'unknown';
+  badge.className = 'sidebar-mode ' + (status === 'on' ? 'live' : 'degraded');
+  badge.textContent = 'PORTAL RISK MONITORING ' + status.toUpperCase();
+  badge.title = signal ? signal.detail : 'Risk signal status has not been checked';
+}
+
+function loadRiskSettings() {
+  return api('/settings/risk', { hideErrorDetails: true }).then(function(data) {
+    state.riskSettings = data;
+    updateRiskSignalBadge();
+  }).catch(function(err) {
+    state.riskSettings = {
+      signal: { status: 'unavailable', detail: err.message },
+      risk_enforcement_enabled: null,
+    };
+    updateRiskSignalBadge();
+    throw err;
+  });
+}
+
 function updateHealthDots() {
+  loadRiskSettings().catch(function(err) { console.warn('Risk settings unavailable:', err.message); });
   api('/system-status').then(function(data) {
     state.systemStatus = data;
     updateStatusBadge();
@@ -735,6 +801,7 @@ var state = {
   policyUpdateResult: null,
   policyConfigs: [],     // saved named configurations
   policyEditorDirty: false,
+  policyEditorPreset: null,
   // mTLS
   mtlsData: null,
   // Health
@@ -742,6 +809,8 @@ var state = {
   systemStatus: null,
   // OAuth
   oauthStatus: null,
+  riskSettings: null,
+  riskSettingsError: null,
   caData: null,
   // CA Admin Governance
   caGovData: null,
@@ -770,6 +839,7 @@ var AGENTS = {
   'budget-backend':  { icon: '\u{1F512}', name: 'BudgetBackend',  role: 'Protected MCP Server',  color: '#5c2d91', spiffe: 'spiffe://aim.microsoft.com/ests/bp/placeholder/aid/budget-backend' },
   'budget-approval': { icon: '\u2705',    name: 'BudgetApproval', role: 'Full-access Caller',    color: '#107c10', spiffe: 'spiffe://aim.microsoft.com/ests/bp/placeholder/aid/budget-approval' },
 };
+var BUILT_IN_AGENT_IDS = Object.keys(AGENTS);
 
 // Callers = all agents except resources (Protected MCP Server role). Rebuilt when config changes.
 function getCallers() {
@@ -793,6 +863,7 @@ var PAGE_META = {
   health:   { title: 'System Health',        sub: 'Gateway status & server management' },
   oauth:    { title: 'Enforcement Layers',   sub: 'All four enforcement layers at a glance' },
   logs:     { title: 'Logs',                 sub: 'Live authorization decisions across all agents' },
+  settings: { title: 'Settings',             sub: 'Risk signals and local risk enforcement' },
 };
 
 /* ── API helpers ── */
@@ -806,9 +877,9 @@ function api(path, opts) {
     if (r.status === 401 && !opts._retried) {
       // Token expired or invalid — retry once with fresh token
       if (msalInstance) {
-        var accounts = msalInstance.getAllAccounts();
-        if (accounts.length > 0) {
-          return acquireTokenAndSetUser(accounts[0]).then(function() {
+        var account = selectedAccount();
+        if (account) {
+          return acquireTokenAndSetUser(account).then(function() {
             return api(path, Object.assign({}, opts, { _retried: true }));
           }).catch(function() {
             // Silent refresh failed — force interactive login
@@ -820,7 +891,16 @@ function api(path, opts) {
     }
     if (!r.ok) {
       return r.json().catch(function() { return { detail: r.statusText }; }).then(function(body) {
-        var err = new Error(body.detail || body.error || 'Request failed (' + r.status + ')');
+        var detail = body.detail || body.error || 'Request failed (' + r.status + ')';
+        if (!opts.hideErrorDetails && body.meta && body.meta.body) {
+          var downstream = body.meta.body;
+          try {
+            var parsed = JSON.parse(downstream);
+            downstream = parsed.error || parsed.detail || downstream;
+          } catch (_) {}
+          detail += ': ' + downstream;
+        }
+        var err = new Error(detail);
         err.status = r.status;
         throw err;
       });
@@ -833,7 +913,12 @@ function loadConfig() {
   return api('/config').then(function(cfg) {
     state.config = cfg;
     updateStatusBadge();
-    // Merge any dynamically-added agents from config into the AGENTS map
+    Object.keys(AGENTS).forEach(function(id) {
+      if (BUILT_IN_AGENT_IDS.indexOf(id) === -1 && (!cfg.agents || !cfg.agents[id])) {
+        delete AGENTS[id];
+      }
+    });
+    // Merge dynamically discovered agents from config into the AGENTS map.
     var dynColors = ['#0277bd', '#6a1b9a', '#e65100', '#2e7d32', '#ad1457'];
     var dynIcons  = ['\u{1F50D}', '\u{1F4CB}', '\u{1F4B0}', '\u{1F4E6}', '\u{1F916}'];
     var dynIdx = 0;
@@ -893,7 +978,7 @@ function applyQuickFix(finding) {
     // Refresh relevant data without auto-re-scanning.
     if (finding.fix_type === 'mtls-remove') {
       return loadMtls();
-    } else if (finding.fix_type === 'rbac-policy') {
+    } else if (finding.fix_type === 'rbac-policy' || finding.fix_type === 'oauth-jwt') {
       return loadPolicy();
     }
   }).catch(function(e) {
@@ -984,7 +1069,7 @@ var PRESET_POLICIES = {
     'admin_governance:\n' +
     '  enabled: true\n' +
     '  target_agent_tag: "finance"\n' +
-    '  risk_enforcement: "sts"\n' +
+    '  risk_enforcement: "off"\n' +
     'policies:\n' +
     '  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"\n' +
     '    name: "budget-report"\n' +
@@ -992,7 +1077,6 @@ var PRESET_POLICIES = {
     '    ca:\n' +
     '      agent_state: enabled\n' +
     '      agent_tag: "Finance"\n' +
-    '      blocked_risk_levels: ["high"]\n' +
     '    rules:\n' +
     '      - path: "/budget/read"\n' +
     '        methods: ["GET", "POST"]\n' +
@@ -1008,7 +1092,6 @@ var PRESET_POLICIES = {
     '    ca:\n' +
     '      agent_state: enabled\n' +
     '      agent_tag: "HR"\n' +
-    '      blocked_risk_levels: ["high"]\n' +
     '    rules:\n' +
     '      - path: "/*"\n' +
     '        methods: ["*"]\n' +
@@ -1019,7 +1102,6 @@ var PRESET_POLICIES = {
     '    ca:\n' +
     '      agent_state: enabled\n' +
     '      agent_tag: "Finance"\n' +
-    '      blocked_risk_levels: ["high"]\n' +
     '    rules:\n' +
     '      - path: "/budget/read"\n' +
     '        methods: ["GET", "POST"]\n' +
@@ -1037,7 +1119,6 @@ var PRESET_POLICIES = {
     '    ca:\n' +
     '      agent_state: enabled\n' +
     '      agent_tag: "Operations"\n' +
-    '      blocked_risk_levels: ["high"]\n' +
     '      skip_target_tag_check: true\n' +
     '    rules:\n' +
     '      - path: "/mgmt/*"\n' +
@@ -1050,7 +1131,7 @@ var PRESET_POLICIES = {
     'admin_governance:\n' +
     '  enabled: true\n' +
     '  target_agent_tag: "finance"\n' +
-    '  risk_enforcement: "sts"\n' +
+    '  risk_enforcement: "off"\n' +
     'policies:\n' +
     '  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"\n' +
     '    name: "budget-report"\n' +
@@ -1058,25 +1139,19 @@ var PRESET_POLICIES = {
     '    ca:\n' +
     '      agent_state: enabled\n' +
     '      agent_tag: "Finance"\n' +
-    '      blocked_risk_levels: ["high"]\n' +
     '    rules:\n' +
     '      - path: "/budget/read"\n' +
     '        methods: ["GET", "POST"]\n' +
     '        action: allow\n' +
-    '        require_jwt: true\n' +
-    '        required_roles: ["Budget.Read"]\n' +
     '      - path: "/budget/submit"\n' +
     '        methods: ["POST"]\n' +
     '        action: allow\n' +
-    '        require_jwt: true\n' +
-    '        required_roles: ["Budget.Submit"]\n' +
     '  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"\n' +
     '    name: "employee-menus"\n' +
     '    description: "No network/STS access - blocked at mTLS + CA tag layers"\n' +
     '    ca:\n' +
     '      agent_state: enabled\n' +
     '      agent_tag: "HR"\n' +
-    '      blocked_risk_levels: ["high"]\n' +
     '    rules:\n' +
     '      - path: "/*"\n' +
     '        methods: ["*"]\n' +
@@ -1087,25 +1162,19 @@ var PRESET_POLICIES = {
     '    ca:\n' +
     '      agent_state: enabled\n' +
     '      agent_tag: "Finance"\n' +
-    '      blocked_risk_levels: ["high"]\n' +
     '    rules:\n' +
     '      - path: "/budget/read"\n' +
     '        methods: ["GET", "POST"]\n' +
     '        action: allow\n' +
-    '        require_jwt: true\n' +
-    '        required_roles: ["Budget.Read"]\n' +
     '      - path: "/budget/submit"\n' +
     '        methods: ["POST"]\n' +
     '        action: allow\n' +
-    '        require_jwt: true\n' +
-    '        required_roles: ["Budget.Submit"]\n' +
     '  - spiffe_id_prefix: "spiffe://aim.microsoft.com/ests/bp/"\n' +
     '    name: "admin-control-plane"\n' +
     '    description: "Dedicated management service"\n' +
     '    ca:\n' +
     '      agent_state: enabled\n' +
     '      agent_tag: "Operations"\n' +
-    '      blocked_risk_levels: ["high"]\n' +
     '      skip_target_tag_check: true\n' +
     '    rules:\n' +
     '      - path: "/mgmt/*"\n' +
@@ -1762,12 +1831,18 @@ function previewAndPush() {
 }
 
 function doPushPolicy(yaml) {
+  var applyingPreset = state.policyEditorPreset && !state.policyEditorDirty && yaml === state.policyEditorYaml;
   state.policyEditorYaml = yaml;
-  api('/policy', { method: 'PUT', headers: { 'Content-Type': 'application/x-yaml' }, body: yaml })
+  var request = applyingPreset
+    ? api('/preset-policies/' + state.policyEditorPreset + '/apply', { method: 'POST' })
+    : api('/policy', { method: 'PUT', headers: { 'Content-Type': 'application/x-yaml' }, body: yaml });
+  request
     .then(function(d) {
-        state.policyUpdateResult = { ok: true, msg: 'Policy updated: ' + (d.old_version || '?') + ' \u2192 ' + (d.new_version || '?') };
+        var policyResult = applyingPreset ? (d.policy || {}) : d;
+        var suffix = applyingPreset ? ' and matching mTLS posture applied' : '';
+        state.policyUpdateResult = { ok: true, msg: 'Policy updated: ' + (policyResult.old_version || '?') + ' \u2192 ' + (policyResult.new_version || '?') + suffix };
         state.policyEditorDirty = false;
-        loadPolicy().then(render);
+        Promise.all([loadPolicy(), loadMtls()]).then(render);
     }).catch(function(e) { state.policyUpdateResult = { ok: false, msg: e.message }; render(); });
 }
 
@@ -1818,7 +1893,7 @@ function loadSelectedConfig() {
   // Handle built-in presets — fetch hydrated versions from server (real SPIFFE IDs)
   if (select.value.indexOf('__preset:') === 0) {
     var presetKey = select.value.replace('__preset:', '');
-    var label = presetKey === 'hardened' ? 'Hardened (deploy default)' : 'Permissive (RBAC open, JWT enforced)';
+    var label = presetKey === 'hardened' ? 'Hardened (deploy default)' : 'Permissive (RBAC, mTLS, and OAuth/JWT open)';
     // Try server-hydrated presets first, fall back to static
     api('/preset-policies').then(function(presets) {
       var yaml = presets[presetKey] || PRESET_POLICIES[presetKey];
@@ -1827,6 +1902,7 @@ function loadSelectedConfig() {
         // Use server-parsed JSON for diff (avoids JS YAML parser issues with safe_dump format)
         state.policyEditorParsed = presets[presetKey + '_parsed'] || null;
         state.policyEditorDirty = false;
+        state.policyEditorPreset = presetKey;
         state.policyUpdateResult = { ok: true, msg: 'Loaded preset: ' + label + ' (hydrated)' };
         render();
       }
@@ -1836,6 +1912,7 @@ function loadSelectedConfig() {
         state.policyEditorYaml = yaml;
         state.policyEditorParsed = null;
         state.policyEditorDirty = false;
+        state.policyEditorPreset = presetKey;
         state.policyUpdateResult = { ok: true, msg: 'Loaded preset: ' + label };
         render();
       }
@@ -1849,6 +1926,7 @@ function loadSelectedConfig() {
 
   state.policyEditorYaml = cfg.yaml;
   state.policyEditorDirty = false;
+  state.policyEditorPreset = null;
   state.policyUpdateResult = { ok: true, msg: 'Loaded "' + cfg.name + '"' };
   render();
 }
@@ -2539,7 +2617,136 @@ function render() {
     case 'health':   renderHealth(content);   break;
     case 'oauth':    renderOAuth(content);    break;
     case 'logs':     renderLogs(content);     break;
+    case 'settings': renderSettings(content); break;
   }
+}
+
+function renderSettings(root) {
+  function info(name, text, id) {
+    var wrap = document.createElement('span'); wrap.className = 'settings-info-wrap';
+    var button = document.createElement('button'); button.className = 'settings-info'; button.type = 'button';
+    button.textContent = 'i'; button.setAttribute('aria-label', 'About ' + name);
+    button.setAttribute('aria-describedby', id);
+    var tooltip = document.createElement('span'); tooltip.className = 'settings-tooltip'; tooltip.id = id;
+    tooltip.setAttribute('role', 'tooltip'); tooltip.textContent = text;
+    wrap.appendChild(button); wrap.appendChild(tooltip); return wrap;
+  }
+  var data = state.riskSettings;
+  if (!data) {
+    var card = document.createElement('div'); card.className = 'card settings-card';
+    var heading = document.createElement('h3'); heading.className = 'section-title';
+    heading.textContent = 'Agent risk settings'; card.appendChild(heading);
+    var loading = document.createElement('p');
+    loading.className = state.riskSettingsError ? 'policy-msg err' : 'finding-desc';
+    loading.textContent = state.riskSettingsError || 'Loading risk settings...';
+    card.appendChild(loading);
+    root.appendChild(card);
+    return;
+  }
+  var signal = data.signal || {};
+  if (state.riskSettingsError) {
+    var error = document.createElement('p'); error.className = 'policy-msg err';
+    error.setAttribute('role', 'alert');
+    error.textContent = state.riskSettingsError; root.appendChild(error);
+  }
+  var grid = document.createElement('div'); grid.className = 'settings-grid';
+  [
+    {
+      title: 'Portal risk monitoring', label: 'Show Entra risk in the portal',
+      description: 'Read Entra risk ratings for visibility. Gateway enforcement is controlled separately.',
+      help: 'This switch controls risk monitoring in the portal only. Turning it off does not stop the gateway from checking Entra risk when gateway enforcement is on. Monitoring does not modify Entra risk ratings or Conditional Access policies.',
+      enabled: signal.enabled, path: '/settings/risk-signal',
+      status: signal.status === 'on' ? 'On' : signal.status === 'off' ? 'Off' : 'Unavailable',
+      notice: signal.status === 'unavailable' ? signal.detail : null,
+    },
+    {
+      title: 'Gateway risk enforcement', label: 'Enforce Entra risk at the gateway',
+      description: 'Check Entra risk when evaluating calls against enabled risk-blocking policies.',
+      help: 'When enabled, governed calls use Microsoft Entra risk ratings and the risk levels blocked by your enabled Conditional Access policies. Missing, invalid, or expired ratings cannot be treated as safe. Security Portal evidence can increase risk, but cannot clear Entra risk. Portal monitoring may be on or off independently. Turning this off skips only gateway risk checks; other configured security controls and tenant token-time policies remain active.',
+      enabled: data.risk_enforcement_enabled, path: '/settings/risk-enforcement',
+      unsupported: !data.enforcement_control_supported || (!data.entra_runtime_supported && !data.risk_enforcement_enabled),
+      status: data.risk_enforcement_enabled === true ? 'On' : data.risk_enforcement_enabled === false ? 'Off' : 'Unavailable',
+      notice: !data.entra_runtime_supported ? 'Update the gateways to enable Entra runtime risk enforcement.' : null,
+    },
+  ].forEach(function(setting, index) {
+    var card = document.createElement('div'); card.className = 'card settings-card';
+    var header = document.createElement('div'); header.className = 'settings-card-header';
+    var title = document.createElement('h3'); title.className = 'section-title'; title.textContent = setting.title;
+    title.appendChild(info(setting.title, setting.help, 'risk-setting-help-' + index));
+    var badge = document.createElement('span');
+    badge.className = 'badge ' + (setting.status === 'On' ? 'ok' : setting.status === 'Off' ? 'low' : 'medium');
+    badge.textContent = setting.status;
+    header.appendChild(title); header.appendChild(badge); card.appendChild(header);
+    var description = document.createElement('p'); description.className = 'finding-desc';
+    description.textContent = setting.description; card.appendChild(description);
+    if (setting.notice) {
+      var notice = document.createElement('p'); notice.className = 'policy-msg warn';
+      notice.setAttribute('role', 'status'); notice.textContent = setting.notice; card.appendChild(notice);
+    }
+    var label = document.createElement('label'); label.className = 'settings-control';
+    var caption = document.createElement('span'); caption.textContent = setting.label; label.appendChild(caption);
+    var toggle = document.createElement('span'); toggle.className = 'settings-switch';
+    var checkbox = document.createElement('input'); checkbox.type = 'checkbox';
+    checkbox.setAttribute('role', 'switch'); checkbox.setAttribute('aria-label', setting.label);
+    checkbox.checked = setting.enabled === true;
+    checkbox.disabled = !currentUser || currentUser.role !== 'admin' || typeof setting.enabled !== 'boolean' || setting.unsupported;
+    checkbox.onchange = function() {
+      var enabled = checkbox.checked;
+      if (!enabled && !confirm('Turn off ' + setting.label.toLowerCase() + '? This explicitly reduces risk monitoring or protection.')) {
+        checkbox.checked = true; return;
+      }
+      checkbox.disabled = true;
+      state.riskSettingsError = null;
+      api(setting.path, { method: 'PUT', body: JSON.stringify({ enabled: enabled }), hideErrorDetails: true })
+        .then(function() { return Promise.all([loadRiskSettings(), loadPolicy()]); })
+        .catch(function(err) { state.riskSettingsError = err.message; })
+        .finally(render);
+    };
+    var track = document.createElement('span'); track.className = 'settings-track';
+    track.setAttribute('aria-hidden', 'true');
+    toggle.appendChild(checkbox); toggle.appendChild(track); label.appendChild(toggle);
+    card.appendChild(label);
+    if (index === 1) {
+      var form = document.createElement('form'); form.className = 'settings-cache';
+      var cacheLabel = document.createElement('label'); cacheLabel.htmlFor = 'risk-cache-seconds';
+      cacheLabel.textContent = 'Entra risk cache lifetime (seconds)';
+      cacheLabel.appendChild(info('Entra risk cache lifetime',
+        'Default: 90 seconds. This is the maximum age of an Entra rating the gateway may reuse. After expiry, the next call must obtain fresh evidence. Set 0 to check Entra on every call, increasing latency and Graph API traffic. If a required lookup fails or returns no valid rating, the call is denied; expired or manually supplied safe ratings are not a fallback.',
+        'risk-cache-help'));
+      form.appendChild(cacheLabel);
+      var row = document.createElement('div'); row.className = 'settings-cache-row';
+      var input = document.createElement('input'); input.id = 'risk-cache-seconds'; input.type = 'number';
+      input.setAttribute('aria-label', 'Entra risk cache lifetime (seconds)');
+      input.min = '0'; input.max = '9223372036'; input.step = '1'; input.required = true;
+      input.value = data.risk_cache_seconds == null ? '90' : String(data.risk_cache_seconds);
+      input.setAttribute('aria-describedby', 'risk-cache-summary risk-cache-help');
+      input.disabled = !currentUser || currentUser.role !== 'admin' || !data.entra_runtime_supported;
+      var save = document.createElement('button'); save.type = 'submit'; save.textContent = 'Save cache lifetime'; save.disabled = input.disabled;
+      row.appendChild(input); row.appendChild(save); form.appendChild(row);
+      var summary = document.createElement('p'); summary.id = 'risk-cache-summary'; summary.className = 'finding-desc';
+      summary.textContent = Number(input.value) === 0 ? 'Checks Entra on every call.' : 'Reuses Entra ratings for up to ' + input.value + ' seconds.';
+      input.oninput = function() {
+        summary.textContent = input.value === '0' ? 'Checks Entra on every call.' : 'Enter a whole number of seconds. Default: 90.';
+      };
+      form.appendChild(summary);
+      form.onsubmit = function(event) {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        save.disabled = true; state.riskSettingsError = null;
+        api('/settings/risk-cache', { method: 'PUT', body: JSON.stringify({ seconds: Number(input.value) }), hideErrorDetails: true })
+          .then(function() { return Promise.all([loadRiskSettings(), loadPolicy()]); })
+          .catch(function(err) { state.riskSettingsError = err.message; })
+          .finally(render);
+      };
+      card.appendChild(form);
+    }
+    grid.appendChild(card);
+  });
+  root.appendChild(grid);
+  var note = document.createElement('p'); note.className = 'finding-desc settings-note';
+  note.textContent = 'These settings do not change your tenant\u2019s Conditional Access policies or token issuance.'
+    + (!currentUser || currentUser.role !== 'admin' ? ' Only administrators can change these settings.' : '');
+  root.appendChild(note);
 }
 
 /* ═══════════ OVERVIEW TAB ═══════════ */
@@ -3525,7 +3732,7 @@ function renderPolicy(root) {
   // Built-in presets (not deletable)
   var presetGroup = document.createElement('optgroup'); presetGroup.label = 'Built-in Presets';
   var hOpt = document.createElement('option'); hOpt.value = '__preset:hardened'; hOpt.textContent = '\uD83D\uDD12 Hardened (deploy default)'; presetGroup.appendChild(hOpt);
-  var pOpt = document.createElement('option'); pOpt.value = '__preset:permissive'; pOpt.textContent = '\uD83D\uDD13 Permissive (RBAC open, JWT enforced)'; presetGroup.appendChild(pOpt);
+  var pOpt = document.createElement('option'); pOpt.value = '__preset:permissive'; pOpt.textContent = '\uD83D\uDD13 Permissive (RBAC + mTLS + OAuth/JWT open)'; presetGroup.appendChild(pOpt);
   select.appendChild(presetGroup);
   // User-saved configs
   if ((state.policyConfigs || []).length > 0) {
@@ -3637,23 +3844,9 @@ function renderPolicy(root) {
           cp.ca.agent_tag = match.graph_tag;
           policyEnriched = true;
         }
-        // Overlay blocked_risk_levels from CA governance if not set in YAML
-        if ((!cp.ca.blocked_risk_levels || cp.ca.blocked_risk_levels.length === 0) && match.blocked_risk_levels && match.blocked_risk_levels.length > 0) {
-          cp.ca.blocked_risk_levels = match.blocked_risk_levels;
-          policyEnriched = true;
-        }
       }
     });
-    // Fix risk_enforcement: if CA policies exist in Entra, enforcement is at STS
     var riskEnforcementNote = '';
-    if (displayPolicy.admin_governance && gov.enabled) {
-      var hasCaPolicies = state.caData && ((state.caData.policies || state.caData.agent_policies || []).length > 0);
-      if (hasCaPolicies && displayPolicy.admin_governance.risk_enforcement !== 'sts') {
-        displayPolicy.admin_governance.risk_enforcement = 'sts';
-        policyEnriched = true;
-        riskEnforcementNote = 'risk_enforcement updated: Entra CA policies enforce at STS (token issuance)';
-      }
-    }
   }
   var activeYaml = displayPolicy ? policyToYaml(displayPolicy) : 'Loading...';
 
@@ -3664,7 +3857,7 @@ function renderPolicy(root) {
   if (policyEnriched) {
     var enrichNote = document.createElement('div');
     enrichNote.style.cssText = 'font-size:11px;color:var(--blue);margin-bottom:8px;font-style:italic';
-    enrichNote.textContent = 'Tags and risk levels updated from Entra Graph API. Push to sidecar to persist.';
+    enrichNote.textContent = 'Tags updated from Entra Graph API. Push to sidecar to persist.';
     lc.appendChild(enrichNote);
     if (riskEnforcementNote) {
       var riskNote = document.createElement('div');
@@ -3690,6 +3883,7 @@ function renderPolicy(root) {
     state.policyEditorDirty = true;
     state.policyEditorYaml = ta.value;
     state.policyEditorParsed = null; // Clear pre-parsed JSON when user edits
+    state.policyEditorPreset = null;
   };
   // Restore cursor position after DOM insertion
   if (savedCursor && savedCursor.focused) {
@@ -3727,6 +3921,7 @@ function renderPolicy(root) {
   copyLink.onclick = function() {
     state.policyEditorYaml = activeYaml;
     state.policyEditorDirty = false;
+    state.policyEditorPreset = null;
     state.policyUpdateResult = { ok: true, msg: 'Editor synced with active policy.' };
     render();
   };
@@ -4111,7 +4306,7 @@ function renderOAuth(root) {
   // ── CA Admin Governance (Layer 4b) ──
   var govTitle = document.createElement('div'); govTitle.className = 'section-title'; govTitle.style.marginTop = '12px'; govTitle.textContent = 'Layer 4b: Admin Governance'; root.appendChild(govTitle);
   var govSubtitle = document.createElement('div'); govSubtitle.style.cssText = 'font-size:12px;color:var(--text-2);margin-bottom:16px';
-  govSubtitle.textContent = 'Agent tags, risk levels, and CA enforcement state from v5.0 policy + sidecar risk store + Entra ID Protection'; root.appendChild(govSubtitle);
+  govSubtitle.textContent = 'Agent tags, risk levels, and CA enforcement state from v5.0 policy'; root.appendChild(govSubtitle);
 
   var caBtnWrap = document.createElement('div'); caBtnWrap.style.cssText = 'display:flex;gap:8px;margin-bottom:16px';
   var loadCaBtn = document.createElement('button'); loadCaBtn.className = 'btn-refresh'; loadCaBtn.textContent = 'Load CA Status';
@@ -4140,6 +4335,18 @@ function renderOAuth(root) {
   if (state.caGovData) {
     var gov = state.caGovData.admin_governance || {};
     var govAgents = state.caGovData.agents || [];
+    var riskProvider = state.caGovData.risk_provider || 'entra';
+    var providerBadge = document.createElement('div'); providerBadge.style.cssText = 'margin-bottom:12px';
+    var providerLabel = document.createElement('span'); providerLabel.className = 'badge';
+    if (riskProvider === 'sidecar') {
+      providerLabel.style.cssText = 'background:var(--amber-light);color:var(--amber);border:1px solid var(--amber-border)';
+      providerLabel.textContent = 'Risk source: authenticated sidecar store (demo mode)';
+    } else {
+      providerLabel.style.cssText = 'background:var(--green-light);color:var(--green);border:1px solid var(--green-border)';
+      providerLabel.textContent = 'Risk source: Entra ID Protection';
+    }
+    providerBadge.appendChild(providerLabel);
+    root.appendChild(providerBadge);
 
     // Admin Governance summary
     var govGrid = document.createElement('div'); govGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:16px 0';
@@ -4229,21 +4436,21 @@ function renderOAuth(root) {
         else { matchBadge.style.cssText = 'background:var(--amber-light);color:var(--amber);border:1px solid var(--amber-border)'; matchBadge.textContent = 'Mismatch'; }
         td4.appendChild(matchBadge); tr.appendChild(td4);
 
-        // Risk level — authoritative from Entra ID Protection (Graph riskyAgents API)
+        // Risk level from the configured authoritative provider.
         var td5 = document.createElement('td'); td5.style.cssText = 'padding:8px 12px';
-        var entraRisk = ag.entra_risk_level || 'none';
-        var entraState = ag.entra_risk_state || 'notAtRisk';
-        var entraLabel = entraRisk === 'none' ? 'safe' : entraRisk;
-        var entraColor = entraRisk === 'high' ? 'var(--red)' : entraRisk === 'medium' ? 'var(--amber)' : 'var(--green)';
-        var entraBg = entraRisk === 'high' ? 'var(--red-light,#fde8e8)' : entraRisk === 'medium' ? 'var(--amber-light)' : 'var(--green-light)';
+        var displayedRisk = riskProvider === 'sidecar' ? (ag.current_risk || 'unknown') : (ag.entra_risk_level || 'none');
+        var displayedState = riskProvider === 'sidecar' ? '' : (ag.entra_risk_state || 'notAtRisk');
+        var displayedLabel = displayedRisk === 'none' ? 'safe' : displayedRisk;
+        var displayedColor = displayedRisk === 'high' ? 'var(--red)' : displayedRisk === 'medium' ? 'var(--amber)' : displayedRisk === 'unknown' ? 'var(--text-3)' : 'var(--green)';
+        var displayedBg = displayedRisk === 'high' ? 'var(--red-light,#fde8e8)' : displayedRisk === 'medium' ? 'var(--amber-light)' : displayedRisk === 'unknown' ? 'var(--bg)' : 'var(--green-light)';
         var entraBadge = document.createElement('span'); entraBadge.className = 'badge';
-        entraBadge.style.cssText = 'background:' + entraBg + ';color:' + entraColor + ';border:1px solid ' + entraColor;
-        entraBadge.textContent = entraLabel;
+        entraBadge.style.cssText = 'background:' + displayedBg + ';color:' + displayedColor + ';border:1px solid ' + displayedColor;
+        entraBadge.textContent = displayedLabel;
         td5.appendChild(entraBadge);
-        if (entraState !== 'notAtRisk' && entraRisk !== 'none') {
+        if (displayedState !== 'notAtRisk' && displayedState && displayedRisk !== 'none') {
           var stateNote = document.createElement('span');
           stateNote.style.cssText = 'margin-left:6px;font-size:10px;color:var(--text-3)';
-          stateNote.textContent = entraState;
+          stateNote.textContent = displayedState;
           td5.appendChild(stateNote);
         }
         tr.appendChild(td5);
@@ -4262,10 +4469,12 @@ function renderOAuth(root) {
         // Actions: risk dropdown + apply
         var td7 = document.createElement('td'); td7.style.cssText = 'padding:8px 12px';
         var riskSelect = document.createElement('select'); riskSelect.style.cssText = 'font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;margin-right:4px';
-        var currentEntraRisk = (ag.entra_risk_level === 'none' || !ag.entra_risk_level) ? 'low' : ag.entra_risk_level;
+        var currentRisk = riskProvider === 'sidecar'
+          ? ag.current_risk
+          : ((ag.entra_risk_level === 'none' || !ag.entra_risk_level) ? 'low' : ag.entra_risk_level);
         ['low', 'medium', 'high'].forEach(function(lvl) {
           var opt = document.createElement('option'); opt.value = lvl; opt.textContent = lvl;
-          if (lvl === currentEntraRisk) opt.selected = true;
+          if (lvl === currentRisk) opt.selected = true;
           riskSelect.appendChild(opt);
         });
         td7.appendChild(riskSelect);
@@ -4277,8 +4486,12 @@ function renderOAuth(root) {
             btnEl.textContent = 'Updating...'; btnEl.disabled = true;
             api('/agent-risk', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spiffe_id: agentData.spiffe_id, risk_level: newRisk }) })
               .then(function(result) {
-                var entraStatus = result && result.entra ? result.entra.entra_status : 'unknown';
-                btnEl.textContent = entraStatus === 'success' ? 'Sent to Entra' : 'Sent (Entra: ' + entraStatus + ')';
+                if (result && result.risk_provider === 'sidecar') {
+                  btnEl.textContent = 'Sent to sidecar store';
+                } else {
+                  var entraStatus = result && result.entra ? result.entra.entra_status : 'unknown';
+                  btnEl.textContent = entraStatus === 'success' ? 'Sent to Entra' : 'Sent (Entra: ' + entraStatus + ')';
+                }
                 btnEl.style.background = 'var(--green-light)'; btnEl.style.color = 'var(--green)'; btnEl.style.borderColor = 'var(--green)';
                 // Delay re-fetch to allow Entra propagation
                 setTimeout(function() {
@@ -4407,6 +4620,7 @@ document.querySelectorAll('.nav-btn').forEach(function(btn) {
     if (tab === 'mtls' && !state.mtlsData) loadMtls().then(render);
     if (tab === 'oauth' && !state.oauthStatus) loadOAuthStatus().then(render);
     if (tab === 'oauth' && !state.caGovData) api('/ca-status').then(function(d) { state.caGovData = d; render(); });
+    if (tab === 'settings') loadRiskSettings().then(render).catch(render);
     render();
     updateAuditStreamLifecycle();
   });

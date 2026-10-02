@@ -1,0 +1,7 @@
+[
+  {
+    "entra_signal_enabled": true,
+    "risk_enforcement_enabled": false,
+    "risk_cache_seconds": 90
+  }
+]

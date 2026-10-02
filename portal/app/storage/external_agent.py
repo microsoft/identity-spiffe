@@ -90,7 +90,7 @@ class BlobExternalAgentStore(ExternalAgentStore):
         try:
             kwargs = {"overwrite": True}
             if etag:
-                from azure.core.match_conditions import MatchConditions
+                from azure.core import MatchConditions
                 kwargs["etag"] = etag
                 kwargs["match_condition"] = MatchConditions.IfNotModified
             blob_client.upload_blob(io.BytesIO(payload), **kwargs)

@@ -6,8 +6,8 @@ One command (`./deploy.sh --new --github`) deploys the full stack end-to-end.
 
 **References:**
 
-- Architecture: [`docs/architecture/next-github-actions-agent-federation.md`](docs/architecture/next-github-actions-agent-federation.md)
 - Platform learnings: [`docs/platform-learnings/GitHub-Actions-Federation.md`](docs/platform-learnings/GitHub-Actions-Federation.md)
+- Productization and validation backlog: [#34](https://github.com/microsoft/identity-spiffe/issues/34)
 
 ---
 

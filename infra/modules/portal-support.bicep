@@ -9,6 +9,8 @@ var portalPolicyConfigContainerName = 'portal-policy-configs'
 var portalPolicyConfigBlobName = 'policy-configs.json'
 var externalAgentStoreContainerName = 'portal-external-agents'
 var externalAgentStoreBlobName = 'external-agents.json'
+var runtimeSettingsContainerName = 'portal-runtime-settings'
+var runtimeSettingsBlobName = 'settings.json'
 
 resource portalPolicyStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: portalPolicyStorageAccountName
@@ -47,6 +49,14 @@ resource externalAgentStoreContainer 'Microsoft.Storage/storageAccounts/blobServ
   }
 }
 
+resource runtimeSettingsContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: portalPolicyBlobService
+  name: runtimeSettingsContainerName
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
 resource portalAppInsights 'Microsoft.Insights/components@2020-02-02' = {
   name: 'appi-${environmentName}'
   location: location
@@ -67,3 +77,5 @@ output policyStoreContainer string = portalPolicyConfigContainerName
 output policyStoreStorageAccountName string = portalPolicyStorage.name
 output externalAgentStoreContainer string = externalAgentStoreContainerName
 output externalAgentStoreBlobName string = externalAgentStoreBlobName
+output runtimeSettingsContainer string = runtimeSettingsContainerName
+output runtimeSettingsBlobName string = runtimeSettingsBlobName

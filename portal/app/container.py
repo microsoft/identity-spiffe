@@ -10,6 +10,7 @@ from .clients import AdminControlPlaneClient, AgentInvokerClient, GraphClient
 from .settings import PortalSettings, load_settings
 from .storage import BlobExternalAgentStore, BlobPolicyConfigStore, FileExternalAgentStore, FilePolicyConfigStore
 from .services import CAService, HealthService, PolicyService, ScanService
+from .services.risk_settings import RiskSettingsService
 
 
 @dataclass
@@ -26,6 +27,7 @@ class PortalContainer:
     scan_service: ScanService
     ca_service: CAService
     health_service: HealthService
+    risk_settings_service: RiskSettingsService
 
     @classmethod
     async def create(cls, config_path, http_client):
@@ -47,8 +49,16 @@ class PortalContainer:
                 blob_name=settings.policy_store_blob,
                 managed_identity_client_id=settings.azure_client_id,
             )
+            risk_settings_store = BlobPolicyConfigStore(
+                account_url=settings.policy_store_account_url,
+                container=settings.runtime_settings_container,
+                blob_name=settings.runtime_settings_blob,
+                managed_identity_client_id=settings.azure_client_id,
+                strict=True,
+            )
         else:
             policy_store = FilePolicyConfigStore(settings.policy_store_path)
+            risk_settings_store = FilePolicyConfigStore(settings.policy_store_path + ".settings.json", strict=True)
         if settings.external_agent_store_provider == "blob" and settings.external_agent_store_account_url:
             external_agent_store = BlobExternalAgentStore(
                 account_url=settings.external_agent_store_account_url,
@@ -59,8 +69,9 @@ class PortalContainer:
         else:
             external_agent_store = FileExternalAgentStore(settings.external_agent_store_path)
         policy_service = PolicyService(settings, admin_client, policy_store)
+        risk_settings_service = RiskSettingsService(risk_settings_store, graph_client, policy_service)
         scan_service = ScanService(policy_service)
-        ca_service = CAService(settings, admin_client, graph_client, agent_invoker)
+        ca_service = CAService(settings, admin_client, graph_client, agent_invoker, risk_settings_service)
         health_service = HealthService(settings, admin_client, policy_store, graph_client)
         return cls(
             settings=settings,
@@ -75,9 +86,15 @@ class PortalContainer:
             scan_service=scan_service,
             ca_service=ca_service,
             health_service=health_service,
+            risk_settings_service=risk_settings_service,
         )
+
+    async def reload_settings(self):
+        # type: () -> None
+        refreshed = await type(self).create(self.settings.config_path, self.http_client)
+        refreshed.risk_settings_service._update_lock = self.risk_settings_service._update_lock
+        self.__dict__.update(refreshed.__dict__)
 
     async def reload_local_settings(self):
         # type: () -> None
-        refreshed = await type(self).create(self.settings.config_path, self.http_client)
-        self.__dict__.update(refreshed.__dict__)
+        await self.reload_settings()
