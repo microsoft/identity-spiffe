@@ -4,7 +4,7 @@
 # =============================================================================
 # Tears down all Azure resources AND cleans up artifacts that azd down misses:
 #   1. Deletes VPN Gateway resources (expensive, ~$140/mo, may not be in azd)
-#   2. Runs azd down --force --purge
+#   2. Runs azd down --force --purge (including portal settings storage/blobs)
 #   3. Clears stale azd env variables
 #   4. Optionally tears down GCP resources (--google)
 #   5. Optionally purges Entra directory objects (--purge-entra)
@@ -136,6 +136,8 @@ STALE_VARS=(
     "VPN_SHARED_KEY"
     "VPN_GATEWAY_PUBLIC_IP"
     "ENTRA_AGENT_ID_GOOGLE_BUDGET_READER"
+    "PORTAL_RUNTIME_SETTINGS_CONTAINER"
+    "PORTAL_RUNTIME_SETTINGS_BLOB_NAME"
 )
 
 for var in "${STALE_VARS[@]}"; do

@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/microsoft/identity-spiffe/src/spiffe-proxy/internal/ca"
 	"github.com/microsoft/identity-spiffe/src/spiffe-proxy/internal/oauth"
 )
@@ -33,18 +34,20 @@ type Decision struct {
 
 // Engine evaluates RBAC policies against incoming requests.
 type Engine struct {
-	store         *PolicyStore
-	validator     oauth.JWTValidator
-	riskStore     *RiskStore
-	tagStore      *TagStore
-	caPolicyCache *ca.PolicyCache
+	store          *PolicyStore
+	validator      oauth.JWTValidator
+	riskStore      *RiskStore
+	tagStore       *TagStore
+	caPolicyCache  *ca.PolicyCache
+	entraRiskCache *ca.RiskCache
 }
 
 // NewEngine creates an RBAC evaluation engine backed by the given store.
 // The validator is optional — if nil, require_jwt rules fail closed
 // (denied with 503 "jwt_validator_unavailable").
-// The riskStore is optional — if nil, risk checks are skipped.
-// The tagStore is optional — if nil, tags are read from YAML policy only.
+// The riskStore is required when the CA cache has active risk blocks.
+// The tagStore is optional — if nil, tags are read from YAML policy only;
+// when configured, missing Graph tags deny rather than falling back to YAML.
 // The caPolicyCache is optional — if nil, risk enforcement is skipped (no YAML fallback).
 func NewEngine(store *PolicyStore, validator oauth.JWTValidator, riskStore *RiskStore, tagStore *TagStore, opts ...EngineOption) *Engine {
 	e := &Engine{store: store, validator: validator, riskStore: riskStore, tagStore: tagStore}
@@ -62,6 +65,49 @@ func WithCAPolicyCache(cache *ca.PolicyCache) EngineOption {
 	return func(e *Engine) {
 		e.caPolicyCache = cache
 	}
+}
+
+func WithEntraRiskCache(cache *ca.RiskCache) EngineOption {
+	return func(e *Engine) { e.entraRiskCache = cache }
+}
+
+func HigherRisk(entraRisk, manualRisk string) string {
+	order := map[string]int{"none": 0, RiskLow: 1, RiskMedium: 2, RiskHigh: 3}
+	if _, valid := order[entraRisk]; !valid {
+		return RiskUnknown
+	}
+	if order[manualRisk] > order[entraRisk] {
+		return manualRisk
+	}
+	return entraRisk
+}
+
+// EntraCallerRisk binds the rating to the authenticated SPIFFE caller, not a JWT
+// or a caller-supplied request field. Foreign exact identities use admin metadata.
+func EntraCallerRisk(policy *Policy, cp *CallerPolicy, spiffeID string, cache *ca.RiskCache) (string, error) {
+	agentID, err := uuid.Parse(cp.EntraAgentID)
+	if err != nil || agentID == uuid.Nil {
+		return "", fmt.Errorf("caller has no Entra agent identity")
+	}
+	parsed, err := url.Parse(spiffeID)
+	if err != nil {
+		return "", fmt.Errorf("invalid SPIFFE caller")
+	}
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	bound := false
+	for i, segment := range segments {
+		if segment == "aid" && i+1 < len(segments) {
+			callerID, err := uuid.Parse(segments[i+1])
+			if err != nil || callerID != agentID {
+				return "", fmt.Errorf("SPIFFE and Entra caller identities do not match")
+			}
+			bound = true
+		}
+	}
+	if !bound && cp.SpiffeID != spiffeID {
+		return "", fmt.Errorf("a namespace prefix cannot supply a single Entra identity")
+	}
+	return cache.GetRisk(agentID.String(), policy.AdminGovernance.RiskCacheLifetime())
 }
 
 // Evaluate checks whether the given (spiffeID, method, path, bearerToken) tuple is allowed.
@@ -105,7 +151,7 @@ func (e *Engine) Evaluate(spiffeID, method, requestPath, bearerToken string) Dec
 	// Step 2: Layer 4b — Conditional Access (admin governance).
 	// CA evaluation runs BEFORE RBAC rules because admin authority
 	// supersedes developer-defined policies.
-	if caDecision := e.evaluateCA(policy, callerPolicy, spiffeID); caDecision != nil {
+	if caDecision := e.evaluateCA(policy, callerPolicy, spiffeID, method, requestPath); caDecision != nil {
 		return *caDecision
 	}
 
@@ -370,7 +416,7 @@ func (e *Engine) FindCallerPolicy(spiffeID string) *CallerPolicy {
 //  3. Tag check — caller's agent_tag vs target's target_agent_tag
 //
 // Returns nil if CA passes (proceed to RBAC), or a deny Decision if blocked.
-func (e *Engine) evaluateCA(policy *Policy, cp *CallerPolicy, spiffeID string) *Decision {
+func (e *Engine) evaluateCA(policy *Policy, cp *CallerPolicy, spiffeID, method, requestPath string) *Decision {
 	if !policy.AdminGovernance.Enabled {
 		return nil // CA not active, proceed to RBAC
 	}
@@ -386,12 +432,51 @@ func (e *Engine) evaluateCA(policy *Policy, cp *CallerPolicy, spiffeID string) *
 		}
 	}
 
+	// The dedicated control plane must be able to establish trusted risk state
+	// after a sidecar restart, when the in-memory store is empty. This exception
+	// is intentionally limited to the authenticated recovery identity and the
+	// single mutation endpoint; all other requests still require risk evidence.
+	riskBootstrap := cp.Name == "admin-control-plane" &&
+		method == "PUT" && requestPath == "/mgmt/agent-risk"
+
 	// 4b-2: Risk check — CA policy from Entra Graph is the sole source of truth.
-	// No YAML fallback: if Graph credentials are configured but CA policy can't be
-	// read, risk enforcement is skipped (not silently using developer-authored YAML).
-	if e.riskStore != nil && e.caPolicyCache != nil {
-		if blockedLevels := e.caPolicyCache.GetBlockedRiskLevels(); len(blockedLevels) > 0 {
-			risk := e.riskStore.GetRisk(spiffeID)
+	// No YAML fallback. A configured cache must have observed a valid policy
+	// list; a failed refresh retains the last-known-good list, including empty.
+	if (e.caPolicyCache != nil || e.entraRiskCache != nil) && policy.AdminGovernance.RiskEnforcement != "off" {
+		if e.caPolicyCache == nil {
+			return &Decision{Action: ActionDeny, Reason: "ca_policy_unavailable", EnforcementLayer: LayerCA, StatusCode: 403}
+		}
+		blockedLevels, ready := e.caPolicyCache.GetRiskPolicy()
+		if !ready {
+			log.Printf("[CA] Policy unavailable: %s", spiffeID)
+			return &Decision{
+				Action: ActionDeny, Reason: "ca_policy_unavailable",
+				EnforcementLayer: LayerCA, StatusCode: 403,
+			}
+		}
+		if len(blockedLevels) > 0 && !riskBootstrap {
+			risk := RiskUnknown
+			if e.entraRiskCache != nil {
+				entraRisk, err := EntraCallerRisk(policy, cp, spiffeID, e.entraRiskCache)
+				if err == nil {
+					risk = entraRisk
+					// SOC evidence can raise risk, but can never clear Entra risk.
+					if e.riskStore != nil {
+						risk = HigherRisk(risk, e.riskStore.GetRisk(spiffeID))
+					}
+				} else {
+					log.Printf("[CA] Entra caller risk unavailable: %s: %v", spiffeID, err)
+				}
+			} else if e.riskStore != nil {
+				risk = e.riskStore.GetRisk(spiffeID)
+			}
+			if !ValidRiskLevel(risk) && !(e.entraRiskCache != nil && risk == "none") {
+				log.Printf("[CA] Agent risk unavailable: %s", spiffeID)
+				return &Decision{
+					Action: ActionDeny, Reason: "agent_risk_unavailable",
+					EnforcementLayer: LayerCA, StatusCode: 403, AgentRisk: RiskUnknown,
+				}
+			}
 			for _, blocked := range blockedLevels {
 				if risk == blocked {
 					log.Printf("[CA] Agent risk blocked: %s risk=%s (blocked levels: %v, source: entra_ca_policy)", spiffeID, risk, blockedLevels)
@@ -408,20 +493,18 @@ func (e *Engine) evaluateCA(policy *Policy, cp *CallerPolicy, spiffeID string) *
 	}
 
 	// 4b-3: Tag check
-	// Priority: TagStore (Graph-sourced, real Entra attributes) > YAML ca.agent_tag
+	// A configured TagStore is authoritative, including absent or empty tags.
 	targetTag := policy.AdminGovernance.TargetAgentTag
 	if targetTag != "" {
 		if cp.CA.SkipTargetTagCheck {
 			log.Printf("[CA] Target tag check bypassed for caller: %s (%s)", spiffeID, cp.Name)
 			return nil
 		}
-		callerTag := cp.CA.AgentTag // fallback: YAML policy value
+		callerTag := cp.CA.AgentTag // static-only mode when no TagStore is configured
 		tagSource := "yaml"
 		if e.tagStore != nil {
-			if graphTag, ok := e.tagStore.GetTag(spiffeID); ok {
-				callerTag = graphTag
-				tagSource = "graph"
-			}
+			callerTag, _ = e.tagStore.GetTag(spiffeID)
+			tagSource = "graph"
 		}
 		if !strings.EqualFold(callerTag, targetTag) {
 			log.Printf("[CA] Agent tag mismatch: %s caller_tag=%q (source=%s) target_tag=%q", spiffeID, callerTag, tagSource, targetTag)

@@ -1,0 +1,13 @@
+.venv/
+.tools/
+artifacts/
+.auth/
+config.local.json
+*.local.json
+__pycache__/
+browser/.auth/
+browser/artifacts/
+protocols/artifacts/
+live/artifacts/
+e2e/artifacts/
+stack/artifacts/

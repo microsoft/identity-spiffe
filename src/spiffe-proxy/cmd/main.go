@@ -309,6 +309,7 @@ func runIngress(spireSocket string) {
 
 	// CA policy cache — declared at function scope so mgmt API can access it
 	var policyCache *ca.PolicyCache
+	var entraRiskCache *ca.RiskCache
 
 	if policyPath != "" {
 		if err := policyStore.LoadFromFile(policyPath); err != nil {
@@ -339,6 +340,8 @@ func runIngress(spireSocket string) {
 			os.Getenv("GRAPH_CLIENT_ID"),
 			os.Getenv("GRAPH_CLIENT_SECRET"),
 		)
+		entraRiskCache = ca.NewRiskCache(graphClient)
+		engineOpts = append(engineOpts, rbac.WithEntraRiskCache(entraRiskCache))
 		if graphClient != nil {
 			syncSec := 60
 			if v := os.Getenv("CA_POLICY_SYNC_INTERVAL"); v != "" {
@@ -367,6 +370,9 @@ func runIngress(spireSocket string) {
 		}
 	}
 	var mgmtOpts []mgmt.ServerOption
+	if entraRiskCache != nil {
+		mgmtOpts = append(mgmtOpts, mgmt.WithEntraRiskCache(entraRiskCache))
+	}
 	if policyCache != nil {
 		mgmtOpts = append(mgmtOpts, mgmt.WithCAPolicyCache(policyCache))
 	}

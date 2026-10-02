@@ -101,6 +101,41 @@ class TestPortalSettings(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings.policy_store_container, "portal-policy-configs")
         self.assertEqual(settings.control_plane.url, "https://admin-control-plane.example")
 
+    async def test_cloud_settings_preserve_explicit_sidecar_risk_provider(self):
+        env = {
+            "PORTAL_MODE": "cloud",
+            "ADMIN_CP_URL": "https://admin-control-plane.example",
+            "MGMT_API_KEY": "super-secret",
+            "AUTH_CLIENT_ID": "portal-client-id",
+            "ISP_ADMIN_GROUP_ID": "admin-group-id",
+            "ISP_VIEWER_GROUP_ID": "viewer-group-id",
+            "AZURE_TENANT_ID": "tenant-id",
+            "POLICY_CONFIG_BLOB_ACCOUNT_URL": "https://storage.example.blob.core.windows.net/",
+            "POLICY_CONFIG_BLOB_CONTAINER": "portal-policy-configs",
+            "POLICY_CONFIG_BLOB_NAME": "policy-configs.json",
+            "CA_RISK_PROVIDER": "sidecar",
+        }
+        discovery = {
+            "agents": {},
+            "control_plane": {
+                "url": "https://admin-control-plane.example",
+            },
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with patch(
+                "portal.app.settings._discover_cloud_agents",
+                new=AsyncMock(return_value=discovery),
+            ):
+                settings = await load_settings("unused.json")
+
+        self.assertEqual(settings.ca_risk_provider, "sidecar")
+
+    async def test_invalid_risk_provider_fails_fast(self):
+        with patch.dict(os.environ, {"CA_RISK_PROVIDER": "unsafe-default"}, clear=False):
+            with self.assertRaises(PortalError) as ctx:
+                await load_settings("unused.json")
+        self.assertEqual(ctx.exception.error_code, "settings_invalid")
+
     async def test_cloud_agent_discovery_failure_is_fatal(self):
         response = httpx.Response(
             503,

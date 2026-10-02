@@ -55,6 +55,11 @@ subheader() {
 # ─── Load environment ────────────────────────────────────────────────────────
 
 AZD_ENV=$(azd_env_load)
+DEPLOYMENT_STATUS=0
+GRAPH_QUERY_SUCCEEDED=true
+ENDPOINT_STATUSES_JSON="{}"
+MISSING_FIC_NAMES_JSON="[]"
+FICS=""
 
 if [[ -z "$AZD_ENV" ]]; then
     fail "No azd environment found. Run: azd env select <env>"
@@ -87,7 +92,13 @@ fi
 if [[ -z "$RG_NAME" ]]; then
     RG_NAME="rg-${ENV_NAME}"
 fi
-LOCATION=$(az group show -n "$RG_NAME" --query location -o tsv 2>/dev/null || echo "unknown")
+RG_EXISTS=$(az group exists --name "$RG_NAME" 2>/dev/null || echo "false")
+if [[ "$RG_EXISTS" == "true" ]]; then
+    LOCATION=$(az group show -n "$RG_NAME" --query location -o tsv 2>/dev/null || echo "unknown")
+else
+    LOCATION="missing"
+    DEPLOYMENT_STATUS=1
+fi
 
 # =============================================================================
 header "Identity Research for Agent Management Using SPIFFE Deployment Status: ${ENV_NAME}"
@@ -260,9 +271,15 @@ try:
         url = data.get('@odata.nextLink', '')
     print(json.dumps(agents))
 except Exception as e:
-    print(json.dumps([]))
+    print('__GRAPH_QUERY_FAILED__')
     print(str(e), file=sys.stderr)
-" 2>/dev/null || echo "[]")
+" 2>/dev/null || echo "__GRAPH_QUERY_FAILED__")
+
+    if [[ "$AGENTS_RESPONSE" == "__GRAPH_QUERY_FAILED__" ]]; then
+        AGENTS_RESPONSE="[]"
+        GRAPH_QUERY_SUCCEEDED=false
+        DEPLOYMENT_STATUS=1
+    fi
 
     echo "$AGENTS_RESPONSE" | python3 -c "
 import sys, json
@@ -286,9 +303,14 @@ except Exception as e:
     subheader "Federated Identity Credentials (FICs)"
 
     if [[ -n "$BP_OBJECT_ID" ]]; then
-        FICS=$(curl -s \
+        FICS=$(curl -fsS \
             "https://graph.microsoft.com/beta/applications/${BP_OBJECT_ID}/federatedIdentityCredentials" \
             -H "Authorization: Bearer ${GRAPH_TOKEN}" 2>/dev/null || true)
+
+        if [[ -z "$FICS" ]]; then
+            GRAPH_QUERY_SUCCEEDED=false
+            DEPLOYMENT_STATUS=1
+        fi
 
         echo "$FICS" | python3 -c "
 import sys, json
@@ -314,9 +336,31 @@ try:
 except Exception as e:
     print(f'  ⚠️  Could not parse FIC response: {e}')
 " 2>/dev/null || warn "Could not query FICs"
+
+        MANAGED_IDENTITY_PRINCIPAL_IDS=$(az identity list -g "$RG_NAME" \
+            --query "[].principalId" -o json 2>/dev/null || echo "[]")
+        if [[ -z "$MANAGED_IDENTITY_PRINCIPAL_IDS" ]]; then
+            MANAGED_IDENTITY_PRINCIPAL_IDS="[]"
+        fi
+        MISSING_FIC_NAMES_JSON=$(
+            FICS_JSON="$FICS" \
+            MANAGED_IDENTITY_PRINCIPAL_IDS="$MANAGED_IDENTITY_PRINCIPAL_IDS" \
+            SCRIPT_DIR="$SCRIPT_DIR" \
+            python3 -c "
+import json, os, sys
+sys.path.insert(0, os.environ['SCRIPT_DIR'])
+from deployment_status import missing_managed_identity_fics
+
+fics = json.loads(os.environ['FICS_JSON']).get('value', [])
+principal_ids = json.loads(os.environ['MANAGED_IDENTITY_PRINCIPAL_IDS'])
+print(json.dumps(missing_managed_identity_fics(fics, principal_ids)))
+" 2>/dev/null || echo "[]"
+        )
     fi
 else
     warn "No Graph token available — skipping Entra queries (run 'az login')"
+    GRAPH_QUERY_SUCCEEDED=false
+    DEPLOYMENT_STATUS=1
 fi
 
 # ─── RBAC Policy ─────────────────────────────────────────────────────────────
@@ -363,19 +407,25 @@ fi
 
 subheader "Portal & mTLS"
 
-PORTAL_URL=$(azd_env_get_from_blob "$AZD_ENV" "SERVICE_PORTAL_ENDPOINT_URL")
+PORTAL_URL=$(azd_env_get_from_blob "$AZD_ENV" "SERVICE_ISP_PORTAL_ENDPOINT_URL")
 MGMT_KEY=$(azd_env_get_from_blob "$AZD_ENV" "MGMT_API_KEY")
 
 if [[ -n "$PORTAL_URL" ]]; then
     printf "  Portal URL: ${PORTAL_URL}\n"
 
     # Check portal health
-    PORTAL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${PORTAL_URL}/health" 2>/dev/null || echo "unreachable")
+    if ! PORTAL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+        "${PORTAL_URL}/health" 2>/dev/null); then
+        PORTAL_STATUS="unreachable"
+    fi
     if [[ "$PORTAL_STATUS" == "200" ]]; then
         ok "Portal health: OK"
     else
         warn "Portal health: ${PORTAL_STATUS}"
+        DEPLOYMENT_STATUS=1
     fi
+    ENDPOINT_STATUSES_JSON=$(PORTAL_STATUS="$PORTAL_STATUS" python3 -c \
+        'import json, os; print(json.dumps({"portal": os.environ["PORTAL_STATUS"]}))')
 else
     info "Portal URL not in azd env"
 fi
@@ -546,3 +596,37 @@ GITHUB_STATUS="not deployed"
 printf "  Google agent:    ${GOOGLE_STATUS}\n"
 printf "  GitHub agent:    ${GITHUB_STATUS}\n"
 echo ""
+
+HEALTH_FINDINGS=$(
+    RESOURCE_GROUP_EXISTS="$RG_EXISTS" \
+    ENDPOINT_STATUSES_JSON="$ENDPOINT_STATUSES_JSON" \
+    GRAPH_QUERY_SUCCEEDED="$GRAPH_QUERY_SUCCEEDED" \
+    MISSING_FIC_NAMES_JSON="$MISSING_FIC_NAMES_JSON" \
+    SCRIPT_DIR="$SCRIPT_DIR" \
+    python3 -c "
+import json, os, sys
+sys.path.insert(0, os.environ['SCRIPT_DIR'])
+from deployment_status import evaluate_environment
+
+findings = evaluate_environment(
+    resource_group_exists=os.environ['RESOURCE_GROUP_EXISTS'] == 'true',
+    endpoint_statuses=json.loads(os.environ['ENDPOINT_STATUSES_JSON']),
+    graph_query_succeeded=os.environ['GRAPH_QUERY_SUCCEEDED'] == 'true',
+    missing_fic_names=json.loads(os.environ['MISSING_FIC_NAMES_JSON']),
+)
+for finding in findings:
+    print(f'{finding.code}: {finding.message}')
+" 2>/dev/null
+)
+
+if [[ -n "$HEALTH_FINDINGS" ]]; then
+    DEPLOYMENT_STATUS=1
+    fail "Deployment state is unhealthy:"
+    while IFS= read -r finding; do
+        printf "    %s\n" "$finding"
+    done <<< "$HEALTH_FINDINGS"
+else
+    ok "Deployment state is healthy"
+fi
+
+exit "$DEPLOYMENT_STATUS"

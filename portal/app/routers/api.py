@@ -8,6 +8,7 @@ import yaml
 
 from ..dependencies import admin_only, get_container, get_request_id, viewer_or_admin
 from ..errors import PortalError
+from ..schemas.api import RiskCacheUpdate, RiskSettingUpdate
 
 _AGENT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 from ..schemas import (
@@ -21,6 +22,30 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/api")
+
+
+@router.get("/settings/risk")
+async def get_risk_settings(request: Request, _user=Depends(viewer_or_admin)):
+    container = get_container(request)
+    return await container.risk_settings_service.get_settings(get_request_id(request))
+
+
+@router.put("/settings/risk-signal")
+async def set_risk_signal(payload: RiskSettingUpdate, request: Request, _user=Depends(admin_only)):
+    container = get_container(request)
+    result = await container.risk_settings_service.set_signal_enabled(payload.enabled)
+    return {key: value for key, value in result.items() if key != "risks"}
+
+
+@router.put("/settings/risk-enforcement")
+async def set_risk_enforcement(payload: RiskSettingUpdate, request: Request, _user=Depends(admin_only)):
+    container = get_container(request)
+    return await container.risk_settings_service.set_enforcement_enabled(payload.enabled, get_request_id(request))
+
+
+@router.put("/settings/risk-cache")
+async def set_risk_cache(payload: RiskCacheUpdate, request: Request, _user=Depends(admin_only)):
+    return await get_container(request).risk_settings_service.set_cache_seconds(payload.seconds, get_request_id(request))
 
 
 async def _resolve_external_invoke_url(container, agent_key):
@@ -39,6 +64,8 @@ async def _resolve_external_invoke_url(container, agent_key):
 @router.get("/config")
 async def get_config(request: Request, _user=Depends(viewer_or_admin)):
     container = get_container(request)
+    if container.settings.runtime_environment == "cloud":
+        await container.reload_settings()
     return container.settings.to_public_dict()
 
 
@@ -197,12 +224,29 @@ async def get_preset_policies(request: Request, _user=Depends(viewer_or_admin)):
     import yaml as _yaml
     hardened_yaml = container.policy_service.build_hardened_rbac_yaml()
     permissive_yaml = container.policy_service.build_permissive_rbac_yaml()
+    preferences = await container.risk_settings_service.preferences()
+    mode = "data_plane" if preferences.get("risk_enforcement_enabled", False) else "off"
+    hardened = _yaml.safe_load(hardened_yaml)
+    permissive = _yaml.safe_load(permissive_yaml)
+    for policy in (hardened, permissive):
+        policy["admin_governance"]["risk_enforcement"] = mode
+        policy["admin_governance"]["risk_cache_seconds"] = preferences.get("risk_cache_seconds", 90)
     return {
-        "hardened": hardened_yaml,
-        "permissive": permissive_yaml,
-        "hardened_parsed": _yaml.safe_load(hardened_yaml),
-        "permissive_parsed": _yaml.safe_load(permissive_yaml),
+        "hardened": _yaml.safe_dump(hardened, sort_keys=False),
+        "permissive": _yaml.safe_dump(permissive, sort_keys=False),
+        "hardened_parsed": hardened,
+        "permissive_parsed": permissive,
     }
+
+
+@router.post("/preset-policies/{preset_name}/apply")
+async def apply_preset_policy(preset_name: str, request: Request, _user=Depends(admin_only)):
+    container = get_container(request)
+    preferences = await container.risk_settings_service.preferences()
+    return await container.policy_service.apply_preset(
+        preset_name, get_request_id(request), preferences.get("risk_enforcement_enabled", False),
+        preferences.get("risk_cache_seconds", 90),
+    )
 
 
 @router.post("/scan")
@@ -242,6 +286,12 @@ async def apply_quick_fix(payload: QuickFixRequest, request: Request, _user=Depe
             if not fallback_yaml:
                 raise PortalError(502, "policy_merge_failed", "Could not build additive RBAC quick fix policy")
             yaml_body = fallback_yaml
+        result = await container.policy_service.put_policy(yaml_body, request_id)
+        return {"status": "applied", "fix_type": payload.fix_type.value, "result": result}
+    if payload.fix_type.value == "oauth-jwt":
+        current_policy = await container.policy_service.get_policy(request_id)
+        hardened_policy = container.policy_service.enable_jwt_validation(current_policy)
+        yaml_body = yaml.safe_dump(hardened_policy, sort_keys=False)
         result = await container.policy_service.put_policy(yaml_body, request_id)
         return {"status": "applied", "fix_type": payload.fix_type.value, "result": result}
     raise PortalError(400, "invalid_fix_type", "Unknown fix_type: {0}".format(payload.fix_type.value))
@@ -327,9 +377,8 @@ async def refresh_agents(request: Request, _user=Depends(admin_only)):
     container = get_container(request)
     if container.settings.runtime_environment != "cloud":
         raise PortalError(403, "forbidden", "Agent refresh is only available in cloud mode; use /api/reload-config in local mode")
-    refreshed = await type(container).create(container.settings.config_path, container.http_client)
-    request.app.state.container = refreshed
-    return {"status": "refreshed", "agents": list(refreshed.settings.agents.keys())}
+    await container.reload_settings()
+    return {"status": "refreshed", "agents": list(container.settings.agents.keys())}
 
 
 @router.post("/sync-attributes")

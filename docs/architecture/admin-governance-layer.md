@@ -110,7 +110,10 @@ The repo now demonstrates two different Layer 4 stories:
 - **BudgetBackend data plane:** risk-level blocking enforced through the SPIFFE sidecar / admin-control-plane path.
 - **Direct A2A app path:** Entra-backed custom-attribute tag matching enforced at the target app after JWT validation.
 
-Today, the direct A2A demo is still **post-token** deny, not guaranteed **token issuance** deny. The CA policy in the tenant is currently report-only, and the live blocking behavior is produced by synced Entra attribute state plus target-side enforcement.
+Today, the direct A2A demo is still **post-token** deny, not guaranteed
+**token issuance** deny. The deployment provisions an enabled high-risk Agent
+Identity CA policy, while attribute matching is produced by synced Entra
+attribute state plus target-side enforcement.
 
 This distinction matters when debugging the portal:
 - `JWT VALIDATED: Yes` + `403 CA DENIED` means the app/data-plane governance layer blocked the request after token issuance.
@@ -297,13 +300,13 @@ CA evaluation results appear in **Entra sign-in logs** — the same logs admins 
 - [What If Evaluation API](https://learn.microsoft.com/en-us/graph/api/conditionalaccessroot-evaluate) enables programmatic pre-deployment validation and CI/CD integration
 - [CA optimization agent](https://learn.microsoft.com/en-us/entra/security-copilot/conditional-access-agent-optimization) scans for unprotected agent identities and recommends policies
 
-## Implementation Phases
+## Current Implementation Boundary
 
-| Phase | Scope | Timeline | Cost |
-|---|---|---|---|
-| 1 | Token-time CA on agent tokens | **In production** (1K+ customers) | Minimal — register as Entra Agent ID constructs |
-| 2 | Data-plane CA in sidecar | Q1 FY27 | Moderate — evaluation client, caching, claims challenge |
-| 3 | Unified visibility + What If | Q2 FY27 | Moderate — portal integration, bidirectional policy awareness |
+The repository combines real token-time Agent Identity CA with prototype
+post-token risk and tag enforcement. Generic application and service-principal
+filter evaluation, claims-challenge integration, and unified What If
+visibility are not complete. That work is tracked in
+[#31](https://github.com/microsoft/identity-spiffe/issues/31).
 
 ## Related
 

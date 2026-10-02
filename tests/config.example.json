@@ -1,0 +1,70 @@
+{
+  "browser": {
+    "management": {
+      "url": "https://management.example.invalid",
+      "sessions": {
+        "admin": "tests/browser/.auth/management-admin.json",
+        "viewer": "tests/browser/.auth/management-viewer.json",
+        "unassigned": "tests/browser/.auth/management-unassigned.json"
+      },
+      "execute_read": {
+        "enabled": false,
+        "dedicated_test_environment": false,
+        "caller_key": "budget-report",
+        "caller_name": "BudgetReport"
+      }
+    },
+    "security": {
+      "url": "https://security.example.invalid",
+      "sessions": {
+        "admin": "tests/browser/.auth/security-admin.json",
+        "viewer": "tests/browser/.auth/security-viewer.json",
+        "unassigned": "tests/browser/.auth/security-unassigned.json"
+      }
+    }
+  },
+  "protocols": {},
+  "live": {
+    "endpoints": {
+      "budget-report": "https://report.example.invalid",
+      "budget-approval": "https://approval.example.invalid",
+      "employee-menus": "https://menus.example.invalid",
+      "management": "https://admin.example.invalid/admin"
+    },
+    "identities": {
+      "budget-report": {
+        "spiffe_id": "spiffe://test.example/ests/bp/BLUEPRINT/aid/REPORT",
+        "oid": "REPORT_OBJECT_ID",
+        "audience": "api://BACKEND_AUDIENCE",
+        "token_env": "LIVE_REPORT_TO_APPROVAL_TOKEN",
+        "invalid_token_env": "LIVE_INVALID_REPORT_TOKEN"
+      },
+      "budget-approval": {
+        "spiffe_id": "spiffe://test.example/ests/bp/BLUEPRINT/aid/APPROVAL",
+        "oid": "APPROVAL_OBJECT_ID",
+        "audience": "api://BACKEND_AUDIENCE",
+        "invalid_token_env": "LIVE_INVALID_APPROVAL_TOKEN"
+      },
+      "employee-menus": {
+        "spiffe_id": "spiffe://test.example/ests/bp/BLUEPRINT/aid/MENUS",
+        "oid": "MENUS_OBJECT_ID",
+        "audience": "api://BACKEND_AUDIENCE",
+        "token_env": "LIVE_MENUS_TO_APPROVAL_TOKEN",
+        "invalid_token_env": "LIVE_INVALID_MENUS_TOKEN"
+      }
+    },
+    "a2a_controls": {
+      "budget-approval": "budget-report"
+    },
+    "admin_key_env": "LIVE_ADMIN_KEY",
+    "timeout_seconds": 20,
+    "exclusive_observation": false,
+    "mutations": {
+      "enabled": false,
+      "environment": "",
+      "marker_env": "LIVE_DEDICATED_ENVIRONMENT",
+      "scope_ids": [],
+      "exclusive": false
+    }
+  }
+}

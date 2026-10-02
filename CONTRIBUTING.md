@@ -24,6 +24,13 @@ instructions when prompted.
 3. Update documentation when behavior, setup, deployment, or public APIs change.
 4. Run targeted validation for the changed area before opening a pull request.
 
+Track planned work, deferred decisions, and implementation checklists in
+[GitHub Issues](https://github.com/microsoft/identity-spiffe/issues). Keep
+repository documentation focused on current architecture, accepted decisions,
+operational runbooks, reference material, and verified platform learnings.
+Link to an issue instead of adding an actionable `TODO` to documentation or
+source comments.
+
 Useful validation commands:
 
 ```bash

@@ -1,6 +1,6 @@
 # Deployment Sequence
 
-> `deploy.sh` is the supported entrypoint. It is non-interactive by default, validates the live deployment unless `--no-verify` is passed, and only launches the portal when `--portal` is supplied. Real Entra CA provisioning is required by default; set `REQUIRE_REAL_CA=false` only when you intentionally want YAML fallback mode. For portal/Security Portal-only changes, use `--portal-only` to skip SPIRE work and avoid re-attestation.
+> `deploy.sh` is the supported entrypoint. It is non-interactive by default, validates the live deployment unless `--no-verify` is passed, and only launches the portal when `--portal` is supplied. Real Entra CA provisioning is required by default; set `REQUIRE_REAL_CA=false` only when you intentionally want YAML fallback mode. Entra ID Protection is the default agent-risk provider; set `CA_RISK_PROVIDER=sidecar` only for an explicit demo deployment whose tenant is not licensed for risky-agent APIs. For portal/Security Portal-only changes, use `--portal-only` to skip SPIRE work and avoid re-attestation.
 
 ```
 Step 1: azd provision        Step 2: Wait 90s        Step 2.5: Entra bootstrap
@@ -91,6 +91,7 @@ The verification suite now includes:
 - `--no-verify`: Skip the live test suite.
 - `--portal`: Launch the portal after a successful deploy.
 - `REQUIRE_REAL_CA=false`: Explicitly allow fallback CA mode when real Entra custom attribute or CA policy provisioning fails.
+- `CA_RISK_PROVIDER=sidecar`: Keep the real Entra CA policy and custom attributes, but read and write agent risk through the authenticated admin-control-plane store when Agent ID Protection is unavailable. Missing sidecar risk fails closed. The default is `entra`; there is no automatic fallback.
 
 ## Full Teardown and Redeploy
 

@@ -14,12 +14,13 @@ logger = logging.getLogger("isp-portal.storage.blob")
 class BlobPolicyConfigStore(PolicyConfigStore):
     """JSON blob-backed config store with optimistic concurrency."""
 
-    def __init__(self, account_url, container, blob_name, managed_identity_client_id=""):
+    def __init__(self, account_url, container, blob_name, managed_identity_client_id="", strict=False):
         # type: (str, str, str, str) -> None
         self.account_url = account_url.rstrip("/")
         self.container = container
         self.blob_name = blob_name
         self.managed_identity_client_id = managed_identity_client_id
+        self.strict = strict
 
     def _build_clients(self):
         # type: () -> tuple
@@ -42,11 +43,17 @@ class BlobPolicyConfigStore(PolicyConfigStore):
             raw = downloader.readall()
             etag = downloader.properties.etag if downloader.properties else None
             if not raw:
+                if self.strict:
+                    raise ValueError("Stored settings blob is empty")
                 return {"configs": [], "etag": etag}
             data = json.loads(raw.decode("utf-8"))
             if not isinstance(data, list):
+                if self.strict:
+                    raise ValueError("Stored settings blob is not a list")
                 logger.warning("Policy blob is not a list: %s", self.blob_name)
                 data = []
+            if self.strict and any(not isinstance(item, dict) for item in data):
+                raise ValueError("Stored settings blob has invalid entries")
             return {"configs": [item for item in data if isinstance(item, dict)], "etag": etag}
         except Exception as exc:
             status_code = getattr(exc, "status_code", None)
@@ -70,7 +77,7 @@ class BlobPolicyConfigStore(PolicyConfigStore):
         try:
             kwargs = {"overwrite": True}
             if etag:
-                from azure.core.match_conditions import MatchConditions
+                from azure.core import MatchConditions
                 kwargs["etag"] = etag
                 kwargs["match_condition"] = MatchConditions.IfNotModified
             blob_client.upload_blob(io.BytesIO(payload), **kwargs)

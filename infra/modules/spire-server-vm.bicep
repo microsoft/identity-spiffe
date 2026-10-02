@@ -77,7 +77,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = if (subnetId
           protocol: 'Tcp'
           sourcePortRange: '*'
           destinationPortRange: '8081'
-          // TODO: Restrict to VNet once Container Apps are VNet-integrated.
+          // VNet restriction and secret-storage hardening are tracked in #32.
           // Currently Container Apps use Azure-managed outbound IPs (not in
           // this VNet), so 'VirtualNetwork' tag would block agent attestation.
           // For production: VNet-integrate Container Apps + use private endpoint.

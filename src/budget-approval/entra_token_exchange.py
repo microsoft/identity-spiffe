@@ -40,6 +40,7 @@ import base64
 import json as _json
 import logging
 import os
+import re
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -327,6 +328,27 @@ def get_last_token_error():
     # type: () -> str | None
     """Return the error string from the most recent failed token acquisition."""
     return _last_token_error
+
+
+def sanitize_token_error(err):
+    # type: (str | None) -> str
+    """Reduce a raw token-error string to a safe, client-facing code.
+
+    Token errors stored in ``_last_token_error`` are formatted by us but
+    interpolate exception text from underlying SDKs (e.g.
+    ``f"ManagedIdentityCredential error: {exc}"``), which can leak stack
+    traces, file paths, or internal state if echoed in HTTP responses.
+
+    This helper returns the canonical, documented Microsoft Entra error
+    code (``AADSTSnnnnn``) when present — that code is intentionally
+    public and useful for client-side branching — and otherwise returns
+    a generic ``token_acquisition_failed``. Full details remain in
+    server-side logs.
+    """
+    if not err:
+        return "token_acquisition_failed"
+    match = re.search(r"AADSTS\d+", err)
+    return match.group(0) if match else "token_acquisition_failed"
 
 
 def get_token_provenance():

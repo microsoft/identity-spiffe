@@ -307,9 +307,9 @@ def _spiffe_id_matches_caller(spiffe_id: str, caller_identifier: str) -> bool:
     return False
 
 
-async def _query_risk_store(caller_identifier: str) -> str:
+async def _query_risk_store(caller_identifier: str):
     if not ADMIN_CONTROL_PLANE_ENDPOINT:
-        return "low"
+        return None
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             headers = {}
@@ -337,7 +337,7 @@ async def _query_risk_store(caller_identifier: str) -> str:
                                 return risk
     except Exception as e:
         logger.warning(f"Risk store query failed: {e}")
-    return "low"
+    return None
 
 
 async def _query_caller_ca(caller_identifier: str) -> dict:

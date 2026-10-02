@@ -64,10 +64,17 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install fastapi httpx pyyaml uvicorn
+        run: pip install -r portal/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: Run portal tests
         run: python -m unittest discover -s portal -p 'test_*.py' -v
+
+      - name: Run portal frontend tests
+        run: node --test portal/tests/*.test.js
 
   agents-ci:
     name: Agents (import, health, auth tests)
@@ -83,7 +90,13 @@ jobs:
         run: pip install fastapi httpx uvicorn starlette "PyJWT[crypto]>=2.8.0"
 
       - name: Run agent tests
-        run: python -m unittest src/test_agents.py -v
+        run: |
+          python -m unittest \
+            scripts/tests/test_deployment_status.py \
+            src/test_agents.py \
+            src/test_token_error_contract.py \
+            src/shared/test_credential_providers.py \
+            -v
 
   docker-build:
     name: Docker build (spiffe-proxy)

@@ -40,6 +40,7 @@ type Server struct {
 	riskStore      *rbac.RiskStore
 	tagStore       *rbac.TagStore
 	caPolicyCache  *ca.PolicyCache
+	entraRiskCache *ca.RiskCache
 	mgmtAPIKey     string
 	apiKeyHash     [32]byte
 	startTime      time.Time
@@ -77,6 +78,7 @@ func NewServer(port int, store *rbac.PolicyStore, logger *logging.AccessLogger, 
 	mux.HandleFunc("/mtls-policy", s.handleMTLSPolicy)
 	mux.HandleFunc("/oauth-status", s.handleOAuthStatus)
 	mux.HandleFunc("/agent-risk", s.handleAgentRisk)
+	mux.HandleFunc("/entra-risk", s.handleEntraRisk)
 	mux.HandleFunc("/agent-tags", s.handleAgentTags)
 	mux.HandleFunc("/ca-policy-effective", s.handleCAPolicyEffective)
 
@@ -216,10 +218,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	health := map[string]interface{}{
-		"status":           "healthy",
-		"policy_version":   s.store.Version(),
-		"policy_loaded_at": s.store.LoadedAt().Format(time.RFC3339),
-		"uptime_seconds":   int(time.Since(s.startTime).Seconds()),
+		"status":                             "healthy",
+		"risk_enforcement_control_supported": true,
+		"entra_risk_enforcement_supported":   s.entraRiskCache != nil,
+		"policy_version":                     s.store.Version(),
+		"policy_loaded_at":                   s.store.LoadedAt().Format(time.RFC3339),
+		"uptime_seconds":                     int(time.Since(s.startTime).Seconds()),
 	}
 
 	// SVID info if identity is available.
@@ -247,6 +251,44 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s.logger.GetMetrics())
+}
+
+func WithEntraRiskCache(cache *ca.RiskCache) ServerOption {
+	return func(s *Server) { s.entraRiskCache = cache }
+}
+
+func (s *Server) handleEntraRisk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	policy := s.store.Get()
+	if policy == nil || s.entraRiskCache == nil {
+		jsonError(w, "Entra runtime risk unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	risks := make(map[string]string)
+	for _, cp := range append(append([]rbac.CallerPolicy{}, policy.Policies...), policy.FederatedPolicies...) {
+		id := cp.SpiffeID
+		if id == "" {
+			id = cp.SpiffeIDPrefix
+		}
+		if selected := r.URL.Query().Get("spiffe_id"); selected != "" && selected != id {
+			continue
+		}
+		level, err := rbac.EntraCallerRisk(policy, &cp, id, s.entraRiskCache)
+		if err != nil {
+			level = rbac.RiskUnknown
+		} else if s.riskStore != nil {
+			level = rbac.HigherRisk(level, s.riskStore.GetRisk(id))
+		}
+		risks[id] = level
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"risks": risks, "source": "entra",
+		"cache_seconds": int64(policy.AdminGovernance.RiskCacheLifetime() / time.Second),
+	})
 }
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
@@ -467,6 +509,12 @@ func (s *Server) handleAgentRisk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getAgentRisk(w http.ResponseWriter, r *http.Request) {
+	if s.entraRiskCache != nil && s.store != nil {
+		if policy := s.store.Get(); policy != nil && policy.AdminGovernance.Enabled && policy.AdminGovernance.RiskEnforcement != "off" {
+			s.handleEntraRisk(w, r)
+			return
+		}
+	}
 	// If ?spiffe_id= is provided, return risk for that specific agent.
 	if spiffeID := r.URL.Query().Get("spiffe_id"); spiffeID != "" {
 		risk := s.riskStore.GetRisk(spiffeID)
@@ -484,7 +532,7 @@ func (s *Server) getAgentRisk(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"risks":         risks,
 		"count":         len(risks),
-		"default_level": "low",
+		"default_level": rbac.RiskUnknown,
 	})
 }
 
@@ -633,11 +681,13 @@ func (s *Server) handleCAPolicyEffective(w http.ResponseWriter, r *http.Request)
 
 	if s.caPolicyCache == nil {
 		result["enabled"] = false
+		result["ready"] = false
 		result["blocked_risk_levels"] = []string{}
 		result["reason"] = "CA policy cache not configured (GRAPH_CLIENT_ID/SECRET not set)"
 	} else {
 		status := s.caPolicyCache.Status()
 		result["enabled"] = status["enabled"]
+		result["ready"] = status["ready"]
 		result["blocked_risk_levels"] = status["blocked_risk_levels"]
 		result["policy_count"] = status["policy_count"]
 		result["fetch_count"] = status["fetch_count"]

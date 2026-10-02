@@ -337,6 +337,8 @@ module aimPortal 'modules/portal-app.bicep' = {
       { name: 'POLICY_CONFIG_BLOB_ACCOUNT_URL', value: portalSupport.outputs.policyStoreAccountUrl }
       { name: 'POLICY_CONFIG_BLOB_CONTAINER', value: portalSupport.outputs.policyStoreContainer }
       { name: 'POLICY_CONFIG_BLOB_NAME', value: portalSupport.outputs.policyStoreBlobName }
+      { name: 'RUNTIME_SETTINGS_BLOB_CONTAINER', value: portalSupport.outputs.runtimeSettingsContainer }
+      { name: 'RUNTIME_SETTINGS_BLOB_NAME', value: portalSupport.outputs.runtimeSettingsBlobName }
       { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: portalSupport.outputs.applicationInsightsConnectionString }
       { name: 'PORTAL_MODE', value: 'cloud' }
     ]
@@ -389,6 +391,8 @@ module securityportalMock 'modules/portal-app.bicep' = {
 // =============================================================================
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer
 output AZURE_RESOURCE_GROUP string = rg.name
+output PORTAL_RUNTIME_SETTINGS_CONTAINER string = portalSupport.outputs.runtimeSettingsContainer
+output PORTAL_RUNTIME_SETTINGS_BLOB_NAME string = portalSupport.outputs.runtimeSettingsBlobName
 output AZURE_TENANT_ID string = azureTenantId
 output SPIRE_SERVER_FQDN string = spireServer.outputs.fqdn
 output SPIRE_SERVER_IP string = spireServer.outputs.ipAddress

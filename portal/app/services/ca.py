@@ -9,12 +9,13 @@ from ..errors import PortalError
 class CAService:
     """Coordinates admin-control-plane and Graph operations."""
 
-    def __init__(self, settings, admin_client, graph_client, agent_invoker):
+    def __init__(self, settings, admin_client, graph_client, agent_invoker, risk_settings_service=None):
         # type: (Any, Any, Any, Any) -> None
         self.settings = settings
         self.admin_client = admin_client
         self.graph_client = graph_client
         self.agent_invoker = agent_invoker
+        self.risk_settings_service = risk_settings_service
 
     def _resolve_agent_oid(self, spiffe_id):
         # type: (str) -> str
@@ -37,7 +38,14 @@ class CAService:
             tag_task,
             ca_effective_task,
         )
-        risky_agents = await self.graph_client.fetch_risky_agents()
+        signal = None
+        if self.risk_settings_service is not None:
+            signal = await self.risk_settings_service.signal_status()
+            risk_provider = risk_data.get("source") or ("entra" if signal["enabled"] else "sidecar")
+            risky_agents = signal["risks"]
+        else:
+            risk_provider = self.settings.ca_risk_provider
+            risky_agents = await self.graph_client.fetch_risky_agents() if risk_provider == "entra" else {}
         sp_oid_to_key = {}
         if risky_agents and self.graph_client.configured:
             for key, agent in self.settings.agents.items():
@@ -63,7 +71,7 @@ class CAService:
             agent = self.settings.agents.get(agent_key)
             spiffe_id = agent.spiffe_id if agent else (self.settings.control_plane.spiffe_id if agent_key == "admin-control-plane" else "")
             ca = entry.get("ca", {})
-            current_risk = "low"
+            current_risk = "unknown"
             for stored_id, risk_level in risk_store.items():
                 if stored_id == spiffe_id:
                     current_risk = risk_level
@@ -72,11 +80,21 @@ class CAService:
             yaml_tag = ca.get("agent_tag", "")
             effective_tag = graph_tag if graph_tag is not None else yaml_tag
             entra_risk = entra_risk_states.get(agent_key, {})
-            entra_risk_level = entra_risk.get("risk_level", "none")
-            risk_in_sync = (current_risk == "low" and entra_risk_level in ("none", "low")) or current_risk == entra_risk_level
+            entra_risk_level = entra_risk.get("risk_level", "unknown")
+            risk_in_sync = (
+                current_risk in ("none", "low", "medium", "high")
+                if risk_provider == "sidecar" or risk_data.get("source") == "entra"
+                else current_risk in ("none", "low", "medium", "high") and (
+                    (current_risk == "none" and entra_risk_level == "none")
+                    or
+                    (current_risk == "low" and entra_risk_level in ("none", "low"))
+                    or current_risk == entra_risk_level
+                )
+            )
             name = agent.name if agent else self.settings.control_plane.name
             tag_in_sync = graph_tag is None or graph_tag.lower() == yaml_tag.lower() if yaml_tag else True
-            risk_policy_gap = admin_governance.get("enabled", False) and not blocked_levels
+            risk_enforcement_enabled = admin_governance.get("enabled", False) and admin_governance.get("risk_enforcement") != "off"
+            risk_policy_gap = admin_governance.get("enabled", False) and risk_enforcement_enabled and not blocked_levels
             agent_statuses.append(
                 {
                     "name": name,
@@ -92,26 +110,33 @@ class CAService:
                     "risk_policy_gap": risk_policy_gap,
                     "current_risk": current_risk,
                     "entra_risk_level": entra_risk_level,
-                    "entra_risk_state": entra_risk.get("risk_state", "notAtRisk"),
+                    "entra_risk_state": entra_risk.get("risk_state", "unknown"),
                     "risk_in_sync": risk_in_sync,
+                    "risk_provider": risk_provider,
                     "tag_matches_target": effective_tag.lower() == admin_governance.get("target_agent_tag", "").lower(),
                 }
             )
         return {
             "admin_governance": admin_governance,
             "agents": agent_statuses,
+            "risk_provider": risk_provider,
             "risk_store": risk_store,
             "entra_risk_states": entra_risk_states,
             "tag_store": tag_store,
             "policy_version": policy_data.get("version", "unknown"),
+            "risk_signal": {key: value for key, value in signal.items() if key != "risks"} if signal else None,
+            "risk_enforcement_enabled": admin_governance.get("enabled", False) and admin_governance.get("risk_enforcement") != "off",
         }
 
     async def update_agent_risk(self, spiffe_id, risk_level, request_id):
         # type: (str, str, str) -> Dict[str, Any]
-        agent_oid = self._resolve_agent_oid(spiffe_id)
-        if not agent_oid:
-            raise PortalError(400, "entra_agent_not_resolved", "Could not resolve Entra agent identity for the selected agent")
-        entra_result = await self.graph_client.push_agent_risk(agent_oid, risk_level)
+        risk_provider = self.settings.ca_risk_provider
+        entra_result = None
+        if risk_provider == "entra":
+            agent_oid = self._resolve_agent_oid(spiffe_id)
+            if not agent_oid:
+                raise PortalError(400, "entra_agent_not_resolved", "Could not resolve Entra agent identity for the selected agent")
+            entra_result = await self.graph_client.push_agent_risk(agent_oid, risk_level)
         sidecar_result = await self.admin_client.put_json(
             "agent-risk",
             {"spiffe_id": spiffe_id, "risk_level": risk_level},
@@ -123,7 +148,12 @@ class CAService:
                 flush_result = await self.agent_invoker.flush_token(agent.url, self.settings.mgmt_api_key, request_id)
                 flush_result["flushed"] = agent_key
                 break
-        return {**sidecar_result, "entra": entra_result, "token_flush": flush_result}
+        return {
+            **sidecar_result,
+            "entra": entra_result,
+            "risk_provider": risk_provider,
+            "token_flush": flush_result,
+        }
 
     async def flush_all_tokens(self, request_id):
         # type: (str) -> Dict[str, Any]

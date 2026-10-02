@@ -1,12 +1,15 @@
 package tunnel
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -76,8 +79,7 @@ func NewServer(appAddr string, tlsConfig *tls.Config, spiffeID string) *Server {
 }
 
 // SetInterceptor enables gateway RBAC interception on this server.
-// When set, the first DATA payload in each tunnel is inspected, RBAC-evaluated,
-// and either forwarded with injected headers or rejected with HTTP 403.
+// When set, one parsed HTTP request per stream is authorized and forwarded.
 func (s *Server) SetInterceptor(i *gateway.Interceptor) {
 	s.interceptor = i
 	log.Println("[Tunnel Server] ✓ Gateway RBAC interceptor enabled")
@@ -173,13 +175,12 @@ func (s *Server) HealthCheck(ctx context.Context, req *tunnelpb.HealthCheckReque
 // Tunnel handles bidirectional tunneling — receives from gRPC, forwards as HTTP to local app.
 //
 // When a gateway interceptor is set:
-//   - The first DATA payload is inspected: HTTP method/path is extracted and RBAC-evaluated
+//   - HTTP headers are parsed across DATA frames and RBAC-evaluated
 //   - If allowed: caller context headers are injected and the modified request is forwarded
 //   - If denied: HTTP 403 is sent back through the tunnel; the app never sees the request
 //   - SECURITY: Only one HTTP request is permitted per tunnel connection when RBAC is active.
-//     After the first request is forwarded, subsequent DATA payloads are rejected and the
-//     tunnel is closed. This prevents HTTP pipelining/smuggling bypasses where a second
-//     request could skip RBAC evaluation.
+//     Only the parsed request body is streamed to the backend; excess bytes are never
+//     forwarded. The backend connection closes after its response.
 func (s *Server) Tunnel(stream tunnelpb.TunnelService_TunnelServer) error {
 	msg, err := stream.Recv()
 	if err != nil {
@@ -275,144 +276,147 @@ func (s *Server) Tunnel(stream tunnelpb.TunnelService_TunnelServer) error {
 	copyCtx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 
-	errCh := make(chan error, 2)
+	responseDone := make(chan error, 1)
 
 	// App response → gRPC tunnel → caller
 	go func() {
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := appConn.Read(buf)
-			if err != nil {
-				if err == io.EOF {
-					errCh <- nil
-				} else {
-					// Suppress noisy errors when we cancelled the context ourselves.
-					select {
-					case <-copyCtx.Done():
-						errCh <- nil
-					default:
-						errCh <- fmt.Errorf("app read error: %w", err)
-					}
-				}
-				return
-			}
 			// Check if cancelled before sending on the stream to avoid
 			// "send on closed stream" panics.
 			select {
 			case <-copyCtx.Done():
-				errCh <- nil
+				responseDone <- nil
 				return
 			default:
 			}
-			if err := stream.Send(&tunnelpb.TunnelMessage{
-				ConnectionId: connectionID,
-				Type:         tunnelpb.MessageType_MESSAGE_TYPE_DATA,
-				Payload:      buf[:n],
-			}); err != nil {
-				errCh <- fmt.Errorf("tunnel send error: %w", err)
-				return
-			}
-		}
-	}()
-
-	// gRPC tunnel (from caller) → App (with gateway interception on first payload)
-	go func() {
-		firstPayload := true
-		rbacActive := s.interceptor != nil
-		var remainingBodyBytes int64 // body bytes still expected after first payload
-		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				if err == io.EOF {
-					errCh <- nil
-				} else {
-					// Suppress noisy errors when we cancelled the context ourselves.
-					select {
-					case <-copyCtx.Done():
-						errCh <- nil
-					default:
-						errCh <- fmt.Errorf("tunnel recv error: %w", err)
-					}
-				}
-				return
-			}
-			switch msg.Type {
-			case tunnelpb.MessageType_MESSAGE_TYPE_DATA:
-				payload := msg.Payload
-
-				// Gateway interception: evaluate RBAC on first DATA payload.
-				if firstPayload && rbacActive {
-					firstPayload = false
-					result := s.interceptor.Process(callerSpiffeID, payload)
-
-					if !result.Allowed {
-						// Send HTTP 403 back through the tunnel.
-						if sendErr := stream.Send(&tunnelpb.TunnelMessage{
-							ConnectionId: connectionID,
-							Type:         tunnelpb.MessageType_MESSAGE_TYPE_DATA,
-							Payload:      result.DenyResponse,
-						}); sendErr != nil {
-							log.Printf("[Tunnel Server] Connection %s: failed to send 403 deny response: %v", connectionID, sendErr)
-						}
-						// Close the tunnel gracefully.
-						if sendErr := stream.Send(&tunnelpb.TunnelMessage{
-							ConnectionId: connectionID,
-							Type:         tunnelpb.MessageType_MESSAGE_TYPE_DISCONNECT,
-						}); sendErr != nil {
-							log.Printf("[Tunnel Server] Connection %s: failed to send disconnect after deny: %v", connectionID, sendErr)
-						}
-						errCh <- nil
-						return
-					}
-					// Use the modified payload (with injected headers).
-					payload = result.ModifiedPayload
-					remainingBodyBytes = result.RemainingBodyBytes
-				} else if !firstPayload && rbacActive {
-					// SECURITY: Allow continuation of request body (e.g., PUT/POST),
-					// but reject additional data once the full body has been received.
-					// This prevents HTTP pipelining/smuggling attacks where a second
-					// request could skip RBAC evaluation, while still allowing
-					// legitimate request bodies that span multiple tunnel messages.
-					if remainingBodyBytes <= 0 {
-						log.Printf("[Tunnel Server] Connection %s: REJECTED additional DATA payload after body complete (anti-smuggling). Closing tunnel.", connectionID)
-						stream.Send(&tunnelpb.TunnelMessage{
-							ConnectionId: connectionID,
-							Type:         tunnelpb.MessageType_MESSAGE_TYPE_DISCONNECT,
-						})
-						errCh <- nil
-						return
-					}
-					remainingBodyBytes -= int64(len(payload))
-					log.Printf("[Tunnel Server] Connection %s: body continuation (%d bytes, %d remaining)", connectionID, len(payload), remainingBodyBytes)
-				} else if firstPayload {
-					firstPayload = false
-				}
-
-				if _, err := appConn.Write(payload); err != nil {
-					errCh <- fmt.Errorf("app write error: %w", err)
+			if n > 0 {
+				if err := stream.Send(&tunnelpb.TunnelMessage{
+					ConnectionId: connectionID,
+					Type:         tunnelpb.MessageType_MESSAGE_TYPE_DATA,
+					Payload:      buf[:n],
+				}); err != nil {
+					responseDone <- fmt.Errorf("tunnel send error: %w", err)
 					return
 				}
-			case tunnelpb.MessageType_MESSAGE_TYPE_DISCONNECT:
-				errCh <- nil
+			}
+			if err != nil {
+				if err == io.EOF || copyCtx.Err() != nil {
+					responseDone <- nil
+				} else {
+					responseDone <- fmt.Errorf("app read error: %w", err)
+				}
 				return
 			}
 		}
 	}()
 
-	// Wait for the first goroutine to finish.
-	firstErr := <-errCh
+	type requestResult struct {
+		forwarded bool
+		err       error
+	}
+	requestDone := make(chan requestResult, 1)
+	go func() {
+		forwarded, err := s.forwardRequest(stream, appConn, callerSpiffeID, connectionID)
+		requestDone <- requestResult{forwarded, err}
+	}()
 
-	// Cancel the context to unblock the other goroutine. Close appConn to
-	// unblock any pending Read on the app-reader goroutine. The context
-	// cancellation propagates to stream.Recv() to unblock the tunnel-reader.
-	cancel()
-	appConn.Close()
+	for {
+		select {
+		case result := <-requestDone:
+			if result.err != nil || !result.forwarded {
+				cancel()
+				appConn.Close()
+				<-responseDone
+				return result.err
+			}
+			requestDone = nil
+		case <-stream.Context().Done():
+			cancel()
+			appConn.Close()
+			<-responseDone
+			return stream.Context().Err()
+		case err := <-responseDone:
+			// Returning the handler cancels the actual gRPC stream and unblocks Recv.
+			// A local child context does not cancel ServerStream.Recv, so joining the
+			// request writer here would deadlock on an incomplete body/early response.
+			return err
+		}
+	}
+}
 
-	// Drain the second goroutine's result so it can be garbage-collected.
-	<-errCh
+// tunnelReader exposes DATA frames as bytes without interpreting HTTP framing.
+type tunnelReader struct {
+	stream  tunnelpb.TunnelService_TunnelServer
+	pending []byte
+}
 
-	log.Printf("[Tunnel Server] Connection %s: closed", connectionID)
-	return firstErr
+func (r *tunnelReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	for len(r.pending) == 0 {
+		msg, err := r.stream.Recv()
+		if err != nil {
+			return 0, err
+		}
+		switch msg.Type {
+		case tunnelpb.MessageType_MESSAGE_TYPE_DATA:
+			r.pending = msg.Payload
+		case tunnelpb.MessageType_MESSAGE_TYPE_DISCONNECT:
+			return 0, io.EOF
+		default:
+			return 0, fmt.Errorf("unexpected tunnel message type: %v", msg.Type)
+		}
+	}
+	n := copy(p, r.pending)
+	r.pending = r.pending[n:]
+	return n, nil
+}
+
+func (s *Server) forwardRequest(stream tunnelpb.TunnelService_TunnelServer, appConn net.Conn, callerID, connectionID string) (bool, error) {
+	input := &tunnelReader{stream: stream}
+	if s.interceptor == nil {
+		_, err := io.Copy(appConn, input)
+		return false, err
+	}
+
+	// Bound header buffering, then remove the limit for the streamed body.
+	// ReadRequest's Body stops at Content-Length or the final chunk/trailers,
+	// even if the reader prefetched a second request from the same DATA frame.
+	limited := &io.LimitedReader{R: input, N: 64 * 1024}
+	req, err := http.ReadRequest(bufio.NewReader(limited))
+	if err != nil {
+		log.Printf("[Tunnel Server] Connection %s: invalid or incomplete HTTP headers", connectionID)
+		if stream.Context().Err() != nil {
+			return false, err
+		}
+		req = nil
+	}
+	result := s.interceptor.Process(callerID, req)
+	if !result.Allowed {
+		if err := stream.Send(&tunnelpb.TunnelMessage{
+			ConnectionId: connectionID,
+			Type:         tunnelpb.MessageType_MESSAGE_TYPE_DATA,
+			Payload:      result.DenyResponse,
+		}); err != nil {
+			return false, fmt.Errorf("send deny response: %w", err)
+		}
+		return false, stream.Send(&tunnelpb.TunnelMessage{
+			ConnectionId: connectionID,
+			Type:         tunnelpb.MessageType_MESSAGE_TYPE_DISCONNECT,
+		})
+	}
+
+	limited.N = math.MaxInt64
+	req.Close = true
+	req.Header.Del("Connection")
+	if err := req.Write(appConn); err != nil {
+		log.Printf("[Tunnel Server] Connection %s: HTTP request forwarding failed", connectionID)
+		return false, fmt.Errorf("forward HTTP request: %w", err)
+	}
+	return true, req.Body.Close()
 }
 
 // Serve starts the gRPC server.
